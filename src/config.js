@@ -14,7 +14,9 @@ const config = {
 
     flwchat: {
     apiToken: process.env.FLWCHAT_API_TOKEN,
-    baseUrl: process.env.FLWCHAT_API_BASE_URL || 'https://api.wts.chat/core',
+    // So o dominio, SEM /core ou /chat no final — o prefixo certo e
+    // adicionado por chamada em src/clients/flwchat.js.
+    baseUrl: process.env.FLWCHAT_API_BASE_URL || 'https://api.wts.chat',
     webhookSecret: process.env.FLWCHAT_WEBHOOK_SECRET || '',
   },
 

@@ -1,0 +1,23 @@
+{
+  "name": "agente-supervisao-academias",
+  "version": "1.0.0",
+  "description": "Agente de supervisao quantitativa e qualitativa dos atendimentos - Greco Forma & Fit.com",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "import-history": "node scripts/import-history.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "googleapis": "^144.0.0",
+    "luxon": "^3.5.0",
+    "node-cron": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

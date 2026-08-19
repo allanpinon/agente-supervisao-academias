@@ -22,20 +22,32 @@ function formatReport({ marca, tipoLabel, dataLabel, data, sinteses }) {
     : 'sem conversões no período';
 
   const blocosQualitativos = sinteses
-    .map(({ atendente, sintese }) => {
-      const fortes = sintese.pontosFortesConsolidados?.length
-        ? sintese.pontosFortesConsolidados.join(', ')
-        : '—';
-      const fracos = sintese.pontosFracosConsolidados?.length
-        ? sintese.pontosFracosConsolidados.join(', ')
-        : '—';
-      return (
-        `*${atendente}* — ${sintese.avaliacaoGeral}\n` +
-        `Objeções: ${sintese.volumeObjecoes}\n` +
-        `Pontos fortes: ${fortes}\n` +
-        `Pontos fracos: ${fracos}\n` +
-        `Sugestão: ${sintese.sugestaoMelhoria}`
-      );
+    .map(({ atendente, convertidos, naoConvertidos }) => {
+      const partes = [`*${atendente}*`];
+
+      if (convertidos) {
+        const padroes = convertidos.padroes?.length ? convertidos.padroes.join(', ') : '—';
+        partes.push(
+          `✅ O que funcionou (atendimentos convertidos): ${convertidos.resumo}\n` +
+          `Padrões: ${padroes}\n` +
+          `Reforçar: ${convertidos.recomendacao}`
+        );
+      }
+
+      if (naoConvertidos) {
+        const padroes = naoConvertidos.padroes?.length ? naoConvertidos.padroes.join(', ') : '—';
+        partes.push(
+          `⚠️ O que travou (atendimentos não convertidos): ${naoConvertidos.resumo}\n` +
+          `Padrões: ${padroes}\n` +
+          `Corrigir: ${naoConvertidos.recomendacao}`
+        );
+      }
+
+      if (!convertidos && !naoConvertidos) {
+        partes.push('Sem atendimentos com resultado definido neste período.');
+      }
+
+      return partes.join('\n');
     })
     .join('\n\n');
 

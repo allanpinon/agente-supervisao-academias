@@ -12,7 +12,7 @@ const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   timezone: process.env.TIMEZONE || 'America/Sao_Paulo',
 
-    flwchat: {
+  flwchat: {
     apiToken: process.env.FLWCHAT_API_TOKEN,
     // So o dominio, SEM /core ou /chat no final — o prefixo certo e
     // adicionado por chamada em src/clients/flwchat.js.
@@ -33,6 +33,7 @@ const config = {
       conversoes: required('SHEET_CONVERSOES_ID', '1FHjPUryN0v4FsgPGjgGP9kQ7Zxhlb0Nl4AJVUbP5d-k'),
       avaliacoes: required('SHEET_AVALIACOES_ID', '1SuD3YISI1kR06dipR18mngQ-oaZU1jF070ahaHLTYlc'),
       sinteses: required('SHEET_SINTESES_ID', '1TCj0DaSpkopKSPI4NB6cqvhBR7BWxeyaZ3QF7bPIxpY'),
+      manual: required('SHEET_MANUAL_ID', '1NG-vi2MRw2N_UXEw5mE8enaGBWX6VTeOZY5t0lbmbNo'),
     },
   },
 

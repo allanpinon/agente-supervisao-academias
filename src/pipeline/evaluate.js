@@ -1,11 +1,15 @@
 // Roda a avaliacao qualitativa (Claude) de uma conversa completa e grava
-// o resultado na aba "Avaliações".
+// o resultado na aba "Avaliações". Tambem injeta o Manual de Boas
+// Praticas mais recente da marca (se existir) como contexto extra, para
+// que a avaliacao va se calibrando com base em conversoes reais dessa
+// marca ao longo do tempo.
 const flwchat = require('../clients/flwchat');
 const claude = require('../clients/claude');
 const sheets = require('../clients/sheets');
 const { formatTranscript } = require('../utils/transcript');
 const { resolveMarcaUnidade } = require('../utils/tags');
 const { nowLocal } = require('../utils/dates');
+const { getLatestManual } = require('../reports/manual');
 const logger = require('../utils/logger');
 
 async function evaluateAndRecordSession(session) {
@@ -16,9 +20,21 @@ async function evaluateAndRecordSession(session) {
   }
 
   const transcript = formatTranscript(messages);
-  const avaliacao = await claude.evaluateConversation(transcript);
-
   const { marca, unidade } = resolveMarcaUnidade(session.contactDetails?.tagsId || []);
+
+  let manualAtual = null;
+  if (marca) {
+    try {
+      manualAtual = await getLatestManual(marca);
+    } catch (err) {
+      logger.warn(`[evaluate] Falha ao buscar Manual de Boas Praticas de ${marca}: ${err.message}`);
+    }
+  }
+
+  const avaliacao = await claude.evaluateConversation(
+    transcript,
+    manualAtual ? manualAtual['Versão do Manual'] : null
+  );
 
   const row = {
     'Data/Hora': nowLocal().toISO(),
@@ -37,6 +53,9 @@ async function evaluateAndRecordSession(session) {
     'Pontos Fortes': (avaliacao.pontosFortes || []).join('; '),
     'Pontos Fracos': (avaliacao.pontosFracos || []).join('; '),
     'Session ID (GymBot)': session.id,
+    // Preenchido depois pela varredura de reconciliacao, quando o
+    // resultado real (conversao ou nao) for confirmado.
+    Resultado: 'Em aberto',
   };
   await sheets.appendRow('avaliacoes', row);
   logger.info(`[evaluate] Avaliacao gravada para sessao ${session.id} (nota geral: ${avaliacao.notaGeral})`);

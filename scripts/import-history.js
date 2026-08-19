@@ -8,6 +8,7 @@ const flwchat = require('../src/clients/flwchat');
 const sheets = require('../src/clients/sheets');
 const { resolveMarcaUnidade } = require('../src/utils/tags');
 const { evaluateAndRecordSession } = require('../src/pipeline/evaluate');
+const { marcarResultadoAvaliacao } = require('../src/reconciliation/sweep');
 const { nowLocal, diffInDays } = require('../src/utils/dates');
 const { config } = require('../src/config');
 const logger = require('../src/utils/logger');
@@ -89,6 +90,8 @@ async function importarConversao(session, atendimentoRow) {
       'Status (Atendido/Fechado)': 'Fechado',
     });
   }
+
+  await marcarResultadoAvaliacao(session.id, 'Convertido');
 }
 
 async function run() {

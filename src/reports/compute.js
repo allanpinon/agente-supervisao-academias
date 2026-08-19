@@ -95,12 +95,17 @@ async function computeReportData(marca, { start, end }) {
     );
     const conversao = atendidosA.length ? (fechadosA.length / atendidosA.length) * 100 : 0;
     const avaliacoesA = avaliacoesMarca.filter((v) => v.Atendente === atendente);
+    // Separadas por resultado — "Em aberto" fica de fora da comparacao
+    // qualitativa (ainda nao sabemos se vai converter ou nao).
+    const avaliacoesConvertidas = avaliacoesA.filter((v) => v.Resultado === 'Convertido');
+    const avaliacoesNaoConvertidas = avaliacoesA.filter((v) => v.Resultado === 'Não convertido');
     return {
       atendente,
       atendidos: atendidosA.length,
       fechados: fechadosA.length,
       conversaoPercent: conversao,
-      avaliacoes: avaliacoesA,
+      avaliacoesConvertidas,
+      avaliacoesNaoConvertidas,
     };
   });
 

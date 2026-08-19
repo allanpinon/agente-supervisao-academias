@@ -43,6 +43,9 @@ const SHEETS = {
       'Nota Clareza da Oferta', 'Nota Tratamento Objeções',
       'Nota Fechamento/CTA', 'Nota Follow-up', 'Objeções Identificadas',
       'Pontos Fortes', 'Pontos Fracos', 'Session ID (GymBot)',
+      // Convertido / Não convertido / Em aberto — preenchido/atualizado
+      // pela varredura de reconciliacao conforme o resultado real do lead.
+      'Resultado',
     ],
   },
   sinteses: {
@@ -52,6 +55,17 @@ const SHEETS = {
       'Data do Período', 'Tipo (Diário/Semanal/Mensal)', 'Marca', 'Atendente',
       'Avaliação Geral', 'Volume de Objeções', 'Pontos Fortes Consolidados',
       'Pontos Fracos Consolidados', 'Sugestão de Melhoria',
+      // Indica se essa linha de sintese e sobre o grupo "Convertido" ou
+      // "Não convertido" do atendente no periodo.
+      'Resultado',
+    ],
+  },
+  manual: {
+    id: config.google.sheets.manual,
+    tab: 'Sheet1',
+    headers: [
+      'Data', 'Marca', 'Versão do Manual', 'Principais Mudanças',
+      'Baseado em (N atendimentos convertidos)', 'Período Analisado',
     ],
   },
 };

@@ -7,8 +7,13 @@
 // apenas 75 marcados "Objetivo atingido". Se o servico confiasse so no
 // SESSION_COMPLETE em tempo real, ele subcontaria conversoes de forma
 // sistematica. Por isso, antes de cada relatorio, revisitamos todo
-// atendimento ainda nao marcado "Fechado" dentro da janela de
-// reconciliacao e reconferimos o status oficial direto na API.
+// atendimento ainda nao finalizado dentro da janela de reconciliacao e
+// reconferimos o status oficial direto na API.
+//
+// Alem de gravar a conversao, a varredura tambem atualiza a coluna
+// "Resultado" da avaliacao qualitativa correspondente (Convertido / Nao
+// convertido) — isso alimenta a analise segmentada dos relatorios e o
+// Manual de Boas Praticas.
 const flwchat = require('../clients/flwchat');
 const sheets = require('../clients/sheets');
 const { config } = require('../config');
@@ -16,19 +21,42 @@ const { resolveMarcaUnidade } = require('../utils/tags');
 const { nowLocal, diffInDays } = require('../utils/dates');
 const logger = require('../utils/logger');
 
+async function marcarResultadoAvaliacao(sessionId, resultado) {
+  if (!sessionId) return;
+  const avaliacao = await sheets.findRowByColumn('avaliacoes', 'Session ID (GymBot)', sessionId);
+  if (!avaliacao) return;
+  if (avaliacao.Resultado === resultado) return; // ja esta certo, evita escrita desnecessaria
+  await sheets.updateRow('avaliacoes', avaliacao._rowNumber, { ...avaliacao, Resultado: resultado });
+}
+
 async function runReconciliationSweep() {
   const rows = await sheets.readAll('atendimentos');
   const cutoff = nowLocal().minus({ days: config.reconciliation.lookbackDays });
 
-  const pending = rows.filter((r) => {
-    if (r['Status (Atendido/Fechado)'] === 'Fechado') return false;
-    if (!r['Data/Hora']) return true;
-    const rowDate = new Date(r['Data/Hora']);
-    if (Number.isNaN(rowDate.getTime())) return true;
-    return rowDate >= cutoff.toJSDate();
+  // "pending": ainda dentro da janela — vale a pena reconferir na API.
+  // "expirados": ja passou da janela sem fechar — damos como "Nao
+  // convertido" definitivo, sem gastar mais chamadas de API com eles.
+  const pending = [];
+  const expirados = [];
+
+  rows.forEach((r) => {
+    const status = r['Status (Atendido/Fechado)'];
+    if (status === 'Fechado' || status === 'Não convertido') return;
+
+    const rowDate = r['Data/Hora'] ? new Date(r['Data/Hora']) : null;
+    const dataValida = rowDate && !Number.isNaN(rowDate.getTime());
+
+    if (!dataValida || rowDate >= cutoff.toJSDate()) {
+      pending.push(r);
+    } else {
+      expirados.push(r);
+    }
   });
 
-  logger.info(`[sweep] Varredura de reconciliacao: ${pending.length} atendimento(s) pendente(s) a reconferir.`);
+  logger.info(
+    `[sweep] Varredura de reconciliacao: ${pending.length} pendente(s) a reconferir, ` +
+    `${expirados.length} expirado(s) a finalizar como "Nao convertido".`
+  );
 
   let novasConversoes = 0;
 
@@ -74,10 +102,23 @@ async function runReconciliationSweep() {
       ...row,
       'Status (Atendido/Fechado)': 'Fechado',
     });
+    await marcarResultadoAvaliacao(sessionId, 'Convertido');
   }
 
-  logger.info(`[sweep] Varredura concluida: ${novasConversoes} nova(s) conversao(oes) registrada(s).`);
-  return { verificados: pending.length, novasConversoes };
+  for (const row of expirados) {
+    const sessionId = row['Session ID (GymBot)'];
+    await sheets.updateRow('atendimentos', row._rowNumber, {
+      ...row,
+      'Status (Atendido/Fechado)': 'Não convertido',
+    });
+    await marcarResultadoAvaliacao(sessionId, 'Não convertido');
+  }
+
+  logger.info(
+    `[sweep] Varredura concluida: ${novasConversoes} nova(s) conversao(oes), ` +
+    `${expirados.length} finalizada(s) como "Nao convertido".`
+  );
+  return { verificados: pending.length, novasConversoes, expirados: expirados.length };
 }
 
-module.exports = { runReconciliationSweep };
+module.exports = { runReconciliationSweep, marcarResultadoAvaliacao };

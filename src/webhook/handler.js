@@ -35,7 +35,15 @@ async function webhookHandler(req, res) {
   try {
     await handler(content);
   } catch (err) {
-    logger.error(`[webhook] Erro processando evento ${eventType}:`, err.message);
+    // Log detalhado: axios (flwchat/evolution) guarda a resposta em
+    // err.response; o SDK da Anthropic guarda status/erro direto no objeto.
+    let detalhes = '';
+    if (err.response) {
+      detalhes = ` [HTTP ${err.response.status} em ${err.config?.method?.toUpperCase() || '?'} ${err.config?.url || '?'}] ${JSON.stringify(err.response.data)}`;
+    } else if (err.status) {
+      detalhes = ` [Anthropic HTTP ${err.status}] ${JSON.stringify(err.error || {})}`;
+    }
+    logger.error(`[webhook] Erro processando evento ${eventType}: ${err.message}${detalhes}`);
   }
 }
 

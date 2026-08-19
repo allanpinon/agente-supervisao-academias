@@ -67,6 +67,62 @@ async function getContact(contactId) {
   return data;
 }
 
+// A sessao (tanto no payload do webhook SESSION_NEW/SESSION_COMPLETE
+// quanto na resposta de GET /v2/session/{id}) nem sempre traz
+// "contactDetails" preenchido — em boa parte dos casos observados vem
+// null, mesmo com as mensagens da conversa vindo normalmente. Isso
+// deixava Marca/Unidade/Lead em branco nas planilhas.
+//
+// Esta funcao tenta reforcar esse dado: se contactDetails ja veio
+// utilizavel (com tagsId ou nome), usa direto — sem gastar chamada extra
+// de API. Senao, tenta achar um ID de contato em varios nomes de campo
+// possiveis (nao temos confirmacao de qual a API realmente usa) e busca
+// o contato completo via GET /core/v1/contact/{id}, que sabemos
+// responder com o registro completo (nome, tags, canal, utm).
+function extractContactId(session) {
+  return (
+    session?.contactDetails?.id
+    || session?.contactId
+    || session?.contact_id
+    || session?.contact?.id
+    || session?.leadId
+    || session?.lead?.id
+    || null
+  );
+}
+
+function hasUsableContactDetails(contactDetails) {
+  return Boolean(contactDetails && ((contactDetails.tagsId && contactDetails.tagsId.length) || contactDetails.name));
+}
+
+async function ensureContactDetails(session, logger) {
+  if (hasUsableContactDetails(session?.contactDetails)) {
+    return session.contactDetails;
+  }
+
+  const contactId = extractContactId(session);
+  if (!contactId) {
+    if (logger) {
+      logger.warn(
+        `[flwchat] Sessao ${session?.id || '?'} sem contactDetails utilizavel e sem ID de ` +
+        `contato reconhecivel nos campos esperados. Campos disponiveis na sessao: ` +
+        `${Object.keys(session || {}).join(', ') || '(nenhum)'}`
+      );
+    }
+    return session?.contactDetails || null;
+  }
+
+  try {
+    const contact = await getContact(contactId);
+    return contact;
+  } catch (err) {
+    if (logger) {
+      logger.warn(`[flwchat] Falha ao buscar contato ${contactId} como reforco: ${err.message}`);
+    }
+    return session?.contactDetails || null;
+  }
+}
+
 // Lista sessoes num periodo — usado pelo importador historico e pela
 // varredura de reconciliacao (quando precisamos redescobrir sessoes que
 // nao vieram por webhook).
@@ -96,6 +152,7 @@ module.exports = {
   getFullConversation,
   getTags,
   getContact,
+  ensureContactDetails,
   listSessions,
   listWebhookEvents,
   createWebhookSubscription,

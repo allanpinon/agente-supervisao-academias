@@ -15,18 +15,21 @@ const { evaluateAndRecordSession } = require('./evaluate');
 const logger = require('../utils/logger');
 
 async function processSessionNew(session) {
-  const { marca, unidade } = resolveMarcaUnidade(session.contactDetails?.tagsId || []);
+  // Reforca contactDetails quando a sessao vem sem esse dado (visto em
+  // boa parte dos eventos reais) — ver flwchat.ensureContactDetails.
+  const contactDetails = await flwchat.ensureContactDetails(session, logger);
+  const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
   const row = {
     'Data/Hora': session.createdAt || nowLocal().toISO(),
     Marca: marca || '',
     Unidade: unidade || '',
     Atendente: session.agentDetails?.name || '',
-    Lead: session.contactDetails?.name || '',
-    Canal: session.contactDetails?.instagram ? 'Instagram' : 'WhatsApp',
+    Lead: contactDetails?.name || '',
+    Canal: contactDetails?.instagram ? 'Instagram' : 'WhatsApp',
     'Status (Atendido/Fechado)': 'Em andamento',
     'Horário 1ª Resposta': '',
     'Session ID (GymBot)': session.id,
-    'Contact ID (GymBot)': session.contactDetails?.id || '',
+    'Contact ID (GymBot)': contactDetails?.id || '',
   };
   await sheets.appendRow('atendimentos', row);
   logger.info(`[processSession] Novo atendimento registrado: sessao ${session.id}`);
@@ -36,6 +39,7 @@ async function processSessionComplete(session) {
   // O payload do webhook pode vir resumido — busca a sessao completa
   // antes de avaliar, pra ter certeza que temos contactDetails/agentDetails.
   const fullSession = await flwchat.getSession(session.id);
+  fullSession.contactDetails = await flwchat.ensureContactDetails(fullSession, logger);
 
   await evaluateAndRecordSession(fullSession);
 

@@ -77,23 +77,27 @@ async function runReconciliationSweep() {
 
     const jaExiste = await sheets.findRowByColumn('conversoes', 'Session ID (GymBot)', sessionId);
     if (!jaExiste) {
-      const { marca, unidade } = resolveMarcaUnidade(session.contactDetails?.tagsId || []);
+      // Reforca contactDetails quando a sessao vem sem esse dado — ver
+      // flwchat.ensureContactDetails. Mesmo assim mantemos o fallback pro
+      // valor ja gravado em Atendimentos, caso nem o reforco encontre nada.
+      const contactDetails = await flwchat.ensureContactDetails(session, logger);
+      const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
       const dataClassificacao = session.updatedAt || nowLocal().toISO();
-      const dataOrigemLead = session.contactDetails?.createdAt || row['Data/Hora'];
+      const dataOrigemLead = contactDetails?.createdAt || row['Data/Hora'];
 
       await sheets.appendRow('conversoes', {
         'Data/Hora': dataClassificacao,
         Marca: marca || row.Marca || '',
         Unidade: unidade || row.Unidade || '',
         Atendente: session.agentDetails?.name || row.Atendente || '',
-        Lead: session.contactDetails?.name || row.Lead || '',
+        Lead: contactDetails?.name || row.Lead || '',
         Valor: session.classification?.amount ?? '',
         'Session ID (GymBot)': sessionId,
         Motivo: category,
         'Dias até Conversão': dataOrigemLead
           ? Math.max(0, Math.round(diffInDays(dataOrigemLead, dataClassificacao)))
           : '',
-        'Contact ID (GymBot)': session.contactDetails?.id || row['Contact ID (GymBot)'] || '',
+        'Contact ID (GymBot)': contactDetails?.id || row['Contact ID (GymBot)'] || '',
       });
       novasConversoes += 1;
     }

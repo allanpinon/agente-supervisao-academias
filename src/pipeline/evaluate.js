@@ -20,7 +20,11 @@ async function evaluateAndRecordSession(session) {
   }
 
   const transcript = formatTranscript(messages);
-  const { marca, unidade } = resolveMarcaUnidade(session.contactDetails?.tagsId || []);
+  // Reforca contactDetails quando a sessao vem sem esse dado — ver
+  // flwchat.ensureContactDetails. Se ja foi enriquecida por quem chamou
+  // (processSession.js, import-history.js), isso nao gasta chamada extra.
+  const contactDetails = await flwchat.ensureContactDetails(session, logger);
+  const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
 
   let manualAtual = null;
   if (marca) {
@@ -41,7 +45,7 @@ async function evaluateAndRecordSession(session) {
     Marca: marca || '',
     Unidade: unidade || '',
     Atendente: session.agentDetails?.name || '',
-    Lead: session.contactDetails?.name || '',
+    Lead: contactDetails?.name || '',
     'Nota Geral (1-5)': avaliacao.notaGeral,
     'Nota Cordialidade': avaliacao.notaCordialidade,
     'Nota Personalização': avaliacao.notaPersonalizacao,

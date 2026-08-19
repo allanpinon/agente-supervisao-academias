@@ -1,10 +1,17 @@
 // Cliente da API do GymBot / flw.chat.
+//
+// IMPORTANTE: a API tem duas "areas" com prefixos de URL diferentes:
+// - /core  -> contatos, tags, campos, equipes, etc.
+// - /chat  -> conversas/sessoes (v2/session), mensagens, canais, etc.
+// FLWCHAT_API_BASE_URL deve conter so o dominio (ex: https://api.wts.chat
+// ou o dominio proprio do GymBot), sem sufixo — o prefixo certo e
+// adicionado aqui, por chamada.
 const axios = require('axios');
 const { config } = require('../config');
 
-function client() {
+function client(prefix) {
   return axios.create({
-    baseURL: config.flwchat.baseUrl,
+    baseURL: `${config.flwchat.baseUrl}${prefix}`,
     headers: {
       Authorization: `Bearer ${config.flwchat.apiToken}`,
       'Content-Type': 'application/json',
@@ -13,13 +20,21 @@ function client() {
   });
 }
 
+function coreClient() {
+  return client('/core');
+}
+
+function chatClient() {
+  return client('/chat');
+}
+
 async function getSession(sessionId) {
-  const { data } = await client().get(`/v2/session/${sessionId}`);
+  const { data } = await chatClient().get(`/v2/session/${sessionId}`);
   return data;
 }
 
 async function getSessionMessages(sessionId, page = 1, pageSize = 100) {
-  const { data } = await client().get(`/v1/session/${sessionId}/message`, {
+  const { data } = await chatClient().get(`/v1/session/${sessionId}/message`, {
     params: { page, pageSize },
   });
   return data;
@@ -43,12 +58,12 @@ async function getFullConversation(sessionId) {
 }
 
 async function getTags() {
-  const { data } = await client().get('/v1/tag');
+  const { data } = await coreClient().get('/v1/tag');
   return data;
 }
 
 async function getContact(contactId) {
-  const { data } = await client().get(`/v1/contact/${contactId}`);
+  const { data } = await coreClient().get(`/v1/contact/${contactId}`);
   return data;
 }
 
@@ -56,19 +71,19 @@ async function getContact(contactId) {
 // varredura de reconciliacao (quando precisamos redescobrir sessoes que
 // nao vieram por webhook).
 async function listSessions({ page = 1, pageSize = 100, startDate, endDate } = {}) {
-  const { data } = await client().get('/v2/session', {
+  const { data } = await chatClient().get('/v2/session', {
     params: { page, pageSize, startDate, endDate },
   });
   return data;
 }
 
 async function listWebhookEvents() {
-  const { data } = await client().get('/v1/webhook/event');
+  const { data } = await coreClient().get('/v1/webhook/event');
   return data;
 }
 
 async function createWebhookSubscription(url, events) {
-  const { data } = await client().post('/v1/webhook-subscription', {
+  const { data } = await coreClient().post('/v1/webhook-subscription', {
     url,
     events,
   });

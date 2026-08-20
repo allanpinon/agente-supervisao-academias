@@ -153,14 +153,32 @@ async function run() {
   const endJS = end.toJSDate();
 
   for (;;) {
-    // eslint-disable-next-line no-await-in-loop
-    const result = await flwchat.listSessions({
-      page,
-      pageSize: PAGE_SIZE,
-      startDate: start.toISO(),
-      endDate: end.toISO(),
-    });
+    // Log ANTES da chamada — sem isso, se a API demorar ou travar, o
+    // console fica em silencio total sem dar pista de onde parou (foi o
+    // que aconteceu numa tentativa anterior: nada aparecia depois dos
+    // indices carregados, e nao dava pra saber se estava so lento ou
+    // travado de verdade).
+    logger.info(`[import-history] Buscando pagina ${page} de sessoes (ate ${PAGE_SIZE} por pagina)...`);
+
+    let result;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      result = await flwchat.listSessions({
+        page,
+        pageSize: PAGE_SIZE,
+        startDate: start.toISO(),
+        endDate: end.toISO(),
+      });
+    } catch (err) {
+      const detalhes = err.response
+        ? ` [HTTP ${err.response.status} em ${err.config?.url || '?'}] ${JSON.stringify(err.response.data)}`
+        : ` [${err.code || 'erro sem codigo'}] ${err.message}`;
+      logger.error(`[import-history] Falha ao buscar pagina ${page} de sessoes:${detalhes}`);
+      throw err;
+    }
+
     const items = result.items || result.data || result.results || [];
+    logger.info(`[import-history] Pagina ${page}: ${items.length} sessao(oes) recebida(s).`);
     if (!items.length) break;
 
     let algumNestaPagina = false;

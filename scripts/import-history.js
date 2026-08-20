@@ -162,13 +162,13 @@ async function run() {
 
     let result;
     try {
+      // Nao adianta mandar startDate/endDate — confirmamos com dado real
+      // que a API ignora esses parametros. O que faz a paginacao ser
+      // eficiente aqui e pedir ordem DESCENDING (mais nova primeiro, ver
+      // flwchat.listSessions) combinado com o filtro por data feito
+      // abaixo e o corte antecipado de paginacao.
       // eslint-disable-next-line no-await-in-loop
-      result = await flwchat.listSessions({
-        page,
-        pageSize: PAGE_SIZE,
-        startDate: start.toISO(),
-        endDate: end.toISO(),
-      });
+      result = await flwchat.listSessions({ page, pageSize: PAGE_SIZE });
     } catch (err) {
       const detalhes = err.response
         ? ` [HTTP ${err.response.status} em ${err.config?.url || '?'}] ${JSON.stringify(err.response.data)}`
@@ -219,6 +219,10 @@ async function run() {
         // branco nas planilhas antes desta correcao.
         // eslint-disable-next-line no-await-in-loop
         session.contactDetails = await flwchat.ensureContactDetails(session, logger);
+        // Mesma ideia para o nome da atendente — ver flwchat.resolveAgentName
+        // (usa a lista de usuarios, buscada uma unica vez e cacheada).
+        // eslint-disable-next-line no-await-in-loop
+        session.agentDetails = { ...(session.agentDetails || {}), name: await flwchat.resolveAgentName(session, logger) };
 
         // eslint-disable-next-line no-await-in-loop
         await importarLead(session, leadsIndex);

@@ -24,6 +24,8 @@ async function evaluateAndRecordSession(session) {
   // flwchat.ensureContactDetails. Se ja foi enriquecida por quem chamou
   // (processSession.js, import-history.js), isso nao gasta chamada extra.
   const contactDetails = await flwchat.ensureContactDetails(session, logger);
+  // Mesma logica para o nome da atendente — ver flwchat.resolveAgentName.
+  const atendente = await flwchat.resolveAgentName(session, logger);
   const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
 
   let manualAtual = null;
@@ -44,7 +46,7 @@ async function evaluateAndRecordSession(session) {
     'Data/Hora': nowLocal().toISO(),
     Marca: marca || '',
     Unidade: unidade || '',
-    Atendente: session.agentDetails?.name || '',
+    Atendente: atendente,
     Lead: contactDetails?.name || '',
     'Nota Geral (1-5)': avaliacao.notaGeral,
     'Nota Cordialidade': avaliacao.notaCordialidade,

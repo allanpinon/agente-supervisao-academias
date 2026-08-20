@@ -81,6 +81,7 @@ async function runReconciliationSweep() {
       // flwchat.ensureContactDetails. Mesmo assim mantemos o fallback pro
       // valor ja gravado em Atendimentos, caso nem o reforco encontre nada.
       const contactDetails = await flwchat.ensureContactDetails(session, logger);
+      const atendente = await flwchat.resolveAgentName(session, logger);
       const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
       const dataClassificacao = session.updatedAt || nowLocal().toISO();
       const dataOrigemLead = contactDetails?.createdAt || row['Data/Hora'];
@@ -89,7 +90,7 @@ async function runReconciliationSweep() {
         'Data/Hora': dataClassificacao,
         Marca: marca || row.Marca || '',
         Unidade: unidade || row.Unidade || '',
-        Atendente: session.agentDetails?.name || row.Atendente || '',
+        Atendente: atendente || row.Atendente || '',
         Lead: contactDetails?.name || row.Lead || '',
         Valor: session.classification?.amount ?? '',
         'Session ID (GymBot)': sessionId,

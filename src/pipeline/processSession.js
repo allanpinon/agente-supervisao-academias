@@ -18,12 +18,13 @@ async function processSessionNew(session) {
   // Reforca contactDetails quando a sessao vem sem esse dado (visto em
   // boa parte dos eventos reais) — ver flwchat.ensureContactDetails.
   const contactDetails = await flwchat.ensureContactDetails(session, logger);
+  const atendente = await flwchat.resolveAgentName(session, logger);
   const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
   const row = {
     'Data/Hora': session.createdAt || nowLocal().toISO(),
     Marca: marca || '',
     Unidade: unidade || '',
-    Atendente: session.agentDetails?.name || '',
+    Atendente: atendente,
     Lead: contactDetails?.name || '',
     Canal: contactDetails?.instagram ? 'Instagram' : 'WhatsApp',
     'Status (Atendido/Fechado)': 'Em andamento',
@@ -40,6 +41,7 @@ async function processSessionComplete(session) {
   // antes de avaliar, pra ter certeza que temos contactDetails/agentDetails.
   const fullSession = await flwchat.getSession(session.id);
   fullSession.contactDetails = await flwchat.ensureContactDetails(fullSession, logger);
+  fullSession.agentDetails = { ...(fullSession.agentDetails || {}), name: await flwchat.resolveAgentName(fullSession, logger) };
 
   await evaluateAndRecordSession(fullSession);
 

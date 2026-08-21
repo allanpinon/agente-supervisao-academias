@@ -13,6 +13,20 @@ const { getLatestManual } = require('../reports/manual');
 const logger = require('../utils/logger');
 
 async function evaluateAndRecordSession(session) {
+  // SESSION_COMPLETE pode chegar duplicado (reenvio de webhook do GymBot)
+  // — sem essa checagem, uma sessao ja avaliada rodava a conversa inteira
+  // de novo pela Claude (custo real e desnecessario de API) e gravava uma
+  // segunda linha em "Avaliações" pro mesmo atendimento. Checa ANTES de
+  // buscar a conversa/chamar a Claude, exatamente para evitar esse gasto.
+  // import-history.js ja faz essa checagem via indice em memoria antes de
+  // chamar esta funcao (mais barato em lote); esta checagem aqui cobre o
+  // caminho de tempo real (processSessionComplete), que nao tinha nenhuma.
+  const existente = await sheets.findRowByColumn('avaliacoes', 'Session ID (GymBot)', session.id);
+  if (existente) {
+    logger.info(`[evaluate] Sessao ${session.id} ja avaliada (linha ${existente._rowNumber}) — SESSION_COMPLETE duplicado, ignorando (nenhuma chamada extra a Claude).`);
+    return null;
+  }
+
   const messages = await flwchat.getFullConversation(session.id);
   if (!messages.length) {
     logger.warn(`[evaluate] Sessao ${session.id} sem mensagens — pulando avaliacao.`);
@@ -43,7 +57,13 @@ async function evaluateAndRecordSession(session) {
   );
 
   const row = {
-    'Data/Hora': nowLocal().toISO(),
+    // Usa a data real da sessao (mesmo campo que sweep.js e
+    // import-history.js usam para esta mesma planilha), em vez do
+    // instante em que o processamento rodou — evita que uma avaliacao de
+    // uma sessao concluida perto da virada do dia caia no dia errado do
+    // relatorio so por causa de um atraso no processamento (fila,
+    // novo tentativa apos 429, etc.).
+    'Data/Hora': session.updatedAt || session.createdAt || nowLocal().toISO(),
     Marca: marca || '',
     Unidade: unidade || '',
     Atendente: atendente,

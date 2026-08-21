@@ -8,6 +8,7 @@
 // adicionado aqui, por chamada.
 const axios = require('axios');
 const { config } = require('../config');
+const { withRetry } = require('../utils/retry');
 
 function client(prefix) {
   return axios.create({
@@ -28,15 +29,24 @@ function chatClient() {
   return client('/chat');
 }
 
+// Todas as chamadas de leitura passam por withRetry — na importacao
+// historica (milhares de sessoes em sequencia) e comum esbarrar no limite
+// de requisicoes por minuto da API do GymBot (HTTP 429). Sem repetir a
+// chamada, a sessao inteira era perdida silenciosamente (so um log de
+// erro, sem gravar nada nas planilhas).
 async function getSession(sessionId) {
-  const { data } = await chatClient().get(`/v2/session/${sessionId}`);
+  const { data } = await withRetry(
+    () => chatClient().get(`/v2/session/${sessionId}`),
+    { label: `getSession ${sessionId}` }
+  );
   return data;
 }
 
 async function getSessionMessages(sessionId, page = 1, pageSize = 100) {
-  const { data } = await chatClient().get(`/v1/session/${sessionId}/message`, {
-    params: { page, pageSize },
-  });
+  const { data } = await withRetry(
+    () => chatClient().get(`/v1/session/${sessionId}/message`, { params: { page, pageSize } }),
+    { label: `getSessionMessages ${sessionId} pagina ${page}` }
+  );
   return data;
 }
 
@@ -58,12 +68,15 @@ async function getFullConversation(sessionId) {
 }
 
 async function getTags() {
-  const { data } = await coreClient().get('/v1/tag');
+  const { data } = await withRetry(() => coreClient().get('/v1/tag'), { label: 'getTags' });
   return data;
 }
 
 async function getContact(contactId) {
-  const { data } = await coreClient().get(`/v1/contact/${contactId}`);
+  const { data } = await withRetry(
+    () => coreClient().get(`/v1/contact/${contactId}`),
+    { label: `getContact ${contactId}` }
+  );
   return data;
 }
 
@@ -124,7 +137,7 @@ async function ensureContactDetails(session, logger) {
 }
 
 async function listAgents() {
-  const { data } = await coreClient().get('/v1/agent');
+  const { data } = await withRetry(() => coreClient().get('/v1/agent'), { label: 'listAgents' });
   return data;
 }
 
@@ -206,16 +219,19 @@ async function resolveAgentName(session, logger) {
 async function listSessions({
   page = 1, pageSize = 100, orderBy = 'createdAt', orderDirection = 'DESCENDING',
 } = {}) {
-  const { data } = await chatClient().get('/v2/session', {
-    params: {
-      page, pageSize, orderBy, orderDirection,
-    },
-  });
+  const { data } = await withRetry(
+    () => chatClient().get('/v2/session', {
+      params: {
+        page, pageSize, orderBy, orderDirection,
+      },
+    }),
+    { label: `listSessions pagina ${page}` }
+  );
   return data;
 }
 
 async function listWebhookEvents() {
-  const { data } = await coreClient().get('/v1/webhook/event');
+  const { data } = await withRetry(() => coreClient().get('/v1/webhook/event'), { label: 'listWebhookEvents' });
   return data;
 }
 

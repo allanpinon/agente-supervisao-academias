@@ -13,6 +13,17 @@ function isPago(utm) {
 }
 
 async function processContactNew(contact) {
+  // CONTACT_NEW pode chegar duplicado (reenvio de webhook do GymBot, ou a
+  // mesma chamada acontecendo via processContactTagUpdate quando o lead
+  // ainda nao existe) — sem checar antes, cada entrega duplicada virava
+  // uma linha nova em "Leads" para o mesmo Contact ID. Mesmo padrao de bug
+  // identificado e corrigido em processSessionNew/evaluateAndRecordSession.
+  const existente = await sheets.findRowByColumn('leads', 'Contact ID (GymBot)', contact.id);
+  if (existente) {
+    logger.info(`[processContact] Lead ${contact.id} ja registrado (linha ${existente._rowNumber}) — CONTACT_NEW duplicado, ignorando.`);
+    return;
+  }
+
   const { marca, unidade } = resolveMarcaUnidade(contact.tagsId || []);
   const row = {
     'Data/Hora': nowLocal().toISO(),

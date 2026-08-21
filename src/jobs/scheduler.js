@@ -9,12 +9,24 @@ const logger = require('../utils/logger');
 function startScheduler() {
   // Diario — todos os dias as 22:00. Se hoje for o ultimo dia do mes,
   // dispara tambem o relatorio mensal logo em seguida.
+  //
+  // IMPORTANTE: o callback do node-cron precisa de try/catch proprio.
+  // Sem isso, um erro nao tratado dentro dele vira uma promise rejeitada
+  // sem ninguem escutando — o que, dependendo da versao do Node, pode
+  // derrubar o processo inteiro do servico (inclusive o webhook, que nao
+  // tem nada a ver com relatorio). Foi isso que aconteceu antes desta
+  // correcao: um erro na geracao do relatorio podia tirar o servico do ar
+  // ate o Railway reiniciar, e o relatorio nunca chegava a ser reenviado.
   cron.schedule(
     '0 22 * * *',
     async () => {
-      await generateAndSendReports('diario');
-      if (isLastDayOfMonth()) {
-        await generateAndSendReports('mensal');
+      try {
+        await generateAndSendReports('diario');
+        if (isLastDayOfMonth()) {
+          await generateAndSendReports('mensal');
+        }
+      } catch (err) {
+        logger.error('[scheduler] Falha no job diario/mensal:', err.message);
       }
     },
     { timezone: config.timezone }
@@ -24,7 +36,11 @@ function startScheduler() {
   cron.schedule(
     '0 8 * * 1',
     async () => {
-      await generateAndSendReports('semanal');
+      try {
+        await generateAndSendReports('semanal');
+      } catch (err) {
+        logger.error('[scheduler] Falha no job semanal:', err.message);
+      }
     },
     { timezone: config.timezone }
   );

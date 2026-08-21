@@ -15,6 +15,17 @@ const { evaluateAndRecordSession } = require('./evaluate');
 const logger = require('../utils/logger');
 
 async function processSessionNew(session) {
+  // SESSION_NEW pode chegar duplicado (reenvio de webhook do GymBot, ou
+  // via o fallback de processSessionComplete quando a linha original nao
+  // e encontrada) — confirmado em dado real da planilha (mesma Session ID
+  // aparecendo duas vezes em "Atendimentos"). Sem essa checagem, cada
+  // entrega duplicada virava uma linha nova.
+  const existente = await sheets.findRowByColumn('atendimentos', 'Session ID (GymBot)', session.id);
+  if (existente) {
+    logger.info(`[processSession] Atendimento da sessao ${session.id} ja registrado (linha ${existente._rowNumber}) — SESSION_NEW duplicado, ignorando.`);
+    return;
+  }
+
   // Reforca contactDetails quando a sessao vem sem esse dado (visto em
   // boa parte dos eventos reais) — ver flwchat.ensureContactDetails.
   const contactDetails = await flwchat.ensureContactDetails(session, logger);

@@ -6,6 +6,7 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { config } = require('../config');
 const { EXCELLENCE_STANDARD } = require('../rubric');
+const { withRetry } = require('../utils/retry');
 
 let anthropicClient = null;
 function client() {
@@ -57,16 +58,25 @@ async function evaluateConversation(transcript, manualContext) {
       `leve esses aprendizados especificos em conta na avaliacao:\n${manualContext}`
     : '';
 
-  const message = await client().messages.create({
-    model: config.anthropic.model,
-    max_tokens: 1024,
-    system: `${EXCELLENCE_STANDARD}${contextoManual}\n\nAvalie a conversa abaixo com base nesses padroes. Seja criterioso e justo — nao invente informacao que nao esta na conversa. Sempre chame a ferramenta "registrar_avaliacao" com o resultado.`,
-    tools: [EVALUATION_TOOL],
-    tool_choice: { type: 'tool', name: 'registrar_avaliacao' },
-    messages: [
-      { role: 'user', content: `Conversa a avaliar:\n\n${transcript}` },
-    ],
-  });
+  // Sem retry aqui, um 429 da API da Claude (comum em rajadas — varios
+  // atendimentos concluidos ao mesmo tempo, ou a importacao historica
+  // avaliando centenas em sequencia) derrubava a avaliacao inteira: o erro
+  // subia, era so logado por quem chamou, e essa sessao nunca mais era
+  // reavaliada automaticamente (diferente de conversao, que a varredura de
+  // reconciliacao reconfere; uma avaliacao perdida fica perdida).
+  const message = await withRetry(
+    () => client().messages.create({
+      model: config.anthropic.model,
+      max_tokens: 1024,
+      system: `${EXCELLENCE_STANDARD}${contextoManual}\n\nAvalie a conversa abaixo com base nesses padroes. Seja criterioso e justo — nao invente informacao que nao esta na conversa. Sempre chame a ferramenta "registrar_avaliacao" com o resultado.`,
+      tools: [EVALUATION_TOOL],
+      tool_choice: { type: 'tool', name: 'registrar_avaliacao' },
+      messages: [
+        { role: 'user', content: `Conversa a avaliar:\n\n${transcript}` },
+      ],
+    }),
+    { label: 'evaluateConversation' }
+  );
 
   const toolUse = message.content.find((c) => c.type === 'tool_use');
   if (!toolUse) throw new Error('Claude nao retornou avaliacao estruturada.');
@@ -121,19 +131,22 @@ async function synthesizeSegment(atendente, periodo, resultado, avaliacoes, manu
       `ele):\n${manualContext}`
     : '';
 
-  const message = await client().messages.create({
-    model: config.anthropic.model,
-    max_tokens: 1024,
-    system: `${EXCELLENCE_STANDARD}${contextoManual}\n\n${foco}\nSeja especifico e pratico. Sempre chame a ferramenta "registrar_analise_segmento".`,
-    tools: [SEGMENT_TOOL],
-    tool_choice: { type: 'tool', name: 'registrar_analise_segmento' },
-    messages: [
-      {
-        role: 'user',
-        content: `Atendente: ${atendente}\nPeriodo: ${periodo}\nGrupo: ${resultado}\n\nAvaliacoes individuais do grupo:\n${resumoAvaliacoes || '(nenhum atendimento neste grupo)'}`,
-      },
-    ],
-  });
+  const message = await withRetry(
+    () => client().messages.create({
+      model: config.anthropic.model,
+      max_tokens: 1024,
+      system: `${EXCELLENCE_STANDARD}${contextoManual}\n\n${foco}\nSeja especifico e pratico. Sempre chame a ferramenta "registrar_analise_segmento".`,
+      tools: [SEGMENT_TOOL],
+      tool_choice: { type: 'tool', name: 'registrar_analise_segmento' },
+      messages: [
+        {
+          role: 'user',
+          content: `Atendente: ${atendente}\nPeriodo: ${periodo}\nGrupo: ${resultado}\n\nAvaliacoes individuais do grupo:\n${resumoAvaliacoes || '(nenhum atendimento neste grupo)'}`,
+        },
+      ],
+    }),
+    { label: `synthesizeSegment ${atendente}/${resultado}` }
+  );
 
   const toolUse = message.content.find((c) => c.type === 'tool_use');
   if (!toolUse) throw new Error('Claude nao retornou analise de segmento estruturada.');
@@ -166,25 +179,28 @@ const MANUAL_TOOL = {
 // cada nova conversa (ver evaluateConversation) e (b) como registro
 // consultavel de boas praticas especificas de cada marca.
 async function updateManual({ marca, manualAnterior, resumoConversoes, periodo }) {
-  const message = await client().messages.create({
-    model: config.anthropic.model,
-    max_tokens: 2048,
-    system: `${EXCELLENCE_STANDARD}\n\nVoce mantem um "Manual de Boas Praticas" vivo para a marca ${marca}, ` +
-      'que consolida os padroes reais de sucesso observados nos atendimentos que converteram. ' +
-      'A cada atualizacao, revise o manual anterior (se existir) e atualize-o com os novos ' +
-      'aprendizados do periodo — mantendo o que ainda e valido, refinando ou removendo o que ' +
-      'nao se confirma mais, e adicionando padroes novos. O manual deve ser pratico e ' +
-      `especifico para este negocio (${marca}), nao generico. Sempre chame a ferramenta "registrar_manual".`,
-    tools: [MANUAL_TOOL],
-    tool_choice: { type: 'tool', name: 'registrar_manual' },
-    messages: [
-      {
-        role: 'user',
-        content: `Periodo analisado: ${periodo}\n\nManual anterior:\n${manualAnterior || '(nenhum manual anterior — esta e a primeira versao)'}\n\n` +
-          `Resumo dos atendimentos que converteram neste periodo:\n${resumoConversoes || '(nenhuma conversao no periodo)'}`,
-      },
-    ],
-  });
+  const message = await withRetry(
+    () => client().messages.create({
+      model: config.anthropic.model,
+      max_tokens: 2048,
+      system: `${EXCELLENCE_STANDARD}\n\nVoce mantem um "Manual de Boas Praticas" vivo para a marca ${marca}, ` +
+        'que consolida os padroes reais de sucesso observados nos atendimentos que converteram. ' +
+        'A cada atualizacao, revise o manual anterior (se existir) e atualize-o com os novos ' +
+        'aprendizados do periodo — mantendo o que ainda e valido, refinando ou removendo o que ' +
+        'nao se confirma mais, e adicionando padroes novos. O manual deve ser pratico e ' +
+        `especifico para este negocio (${marca}), nao generico. Sempre chame a ferramenta "registrar_manual".`,
+      tools: [MANUAL_TOOL],
+      tool_choice: { type: 'tool', name: 'registrar_manual' },
+      messages: [
+        {
+          role: 'user',
+          content: `Periodo analisado: ${periodo}\n\nManual anterior:\n${manualAnterior || '(nenhum manual anterior — esta e a primeira versao)'}\n\n` +
+            `Resumo dos atendimentos que converteram neste periodo:\n${resumoConversoes || '(nenhuma conversao no periodo)'}`,
+        },
+      ],
+    }),
+    { label: `updateManual ${marca}` }
+  );
 
   const toolUse = message.content.find((c) => c.type === 'tool_use');
   if (!toolUse) throw new Error('Claude nao retornou manual estruturado.');

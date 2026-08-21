@@ -60,7 +60,23 @@ async function gravarSinteses(marca, tipo, sinteses) {
 
 async function generateAndSendReports(tipo) {
   logger.info(`[reports] Iniciando geracao do relatorio ${tipo}...`);
-  await runReconciliationSweep();
+
+  // A varredura de reconciliacao NAO pode travar o relatorio inteiro se
+  // falhar (por exemplo, se bater no limite de requisicoes da API do
+  // GymBot ao reconferir muitos atendimentos em aberto de uma vez). Antes
+  // desta correcao, um erro aqui abortava a funcao inteira antes mesmo de
+  // tentar enviar qualquer coisa pras duas marcas — e por estar fora de
+  // qualquer try/catch, o erro tambem podia derrubar o processo inteiro
+  // do servico (o agendamento do node-cron nao trata erro sozinho).
+  try {
+    await runReconciliationSweep();
+  } catch (err) {
+    logger.error(
+      `[reports] Varredura de reconciliacao falhou — seguindo para gerar o relatorio ${tipo} ` +
+      `mesmo assim (os numeros de conversao podem estar desatualizados ate a proxima varredura ` +
+      `bem-sucedida): ${err.message}`
+    );
+  }
 
   const periodo = periodoDeTipo(tipo);
   const dataLabel = nowLocal().toFormat('dd/MM/yyyy');

@@ -8,6 +8,19 @@ function required(name, fallback) {
   return value;
 }
 
+// Protecao contra um erro facil de cometer ao colar uma URL nas
+// variaveis do Railway: esquecer o "https://" na frente. Sem o esquema, a
+// chamada falha com "Invalid URL" sem nenhuma pista de qual variavel foi
+// a causa — ja aconteceu com FLWCHAT_API_BASE_URL antes, e aconteceu de
+// novo com EVOLUTION_API_URL (bloqueou o envio dos relatorios no
+// WhatsApp). Em vez de so validar, corrige sozinho quando possivel.
+function normalizeUrl(value) {
+  if (!value) return value;
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   timezone: process.env.TIMEZONE || 'America/Sao_Paulo',
@@ -16,7 +29,7 @@ const config = {
     apiToken: process.env.FLWCHAT_API_TOKEN,
     // So o dominio, SEM /core ou /chat no final — o prefixo certo e
     // adicionado por chamada em src/clients/flwchat.js.
-    baseUrl: process.env.FLWCHAT_API_BASE_URL || 'https://api.wts.chat',
+    baseUrl: normalizeUrl(process.env.FLWCHAT_API_BASE_URL) || 'https://api.wts.chat',
     webhookSecret: process.env.FLWCHAT_WEBHOOK_SECRET || '',
   },
 
@@ -38,7 +51,7 @@ const config = {
   },
 
   evolution: {
-    apiUrl: process.env.EVOLUTION_API_URL,
+    apiUrl: normalizeUrl(process.env.EVOLUTION_API_URL),
     instance: process.env.EVOLUTION_INSTANCE,
     apiKey: process.env.EVOLUTION_API_KEY,
     groups: {

@@ -84,7 +84,20 @@ async function runReconciliationSweep() {
       const atendente = await flwchat.resolveAgentName(session, logger);
       const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
       const dataClassificacao = session.updatedAt || nowLocal().toISO();
-      const dataOrigemLead = contactDetails?.createdAt || row['Data/Hora'];
+      // Origem do calculo de "Dias ate Conversao": data do PRIMEIRO
+      // atendimento deste lead (nao a data de criacao do contato no
+      // GymBot, e nao necessariamente esta sessao) — mede de fato "quanto
+      // tempo o lead levou pra virar cliente", incluindo reativacao (lead
+      // nao fecha no primeiro atendimento, some, volta meses depois
+      // impactado por outro anuncio e ai sim fecha). findEarliestRowByColumn
+      // olha a DATA de cada linha, nao a ordem na planilha — funciona mesmo
+      // com atendimentos que vieram de uma importacao historica (que pode
+      // ter inserido fora de ordem cronologica, ver import-history.js).
+      const contactIdAtual = contactDetails?.id || row['Contact ID (GymBot)'];
+      const primeiroAtendimento = await sheets.findEarliestRowByColumn(
+        'atendimentos', 'Contact ID (GymBot)', contactIdAtual, 'Data/Hora'
+      );
+      const dataOrigemLead = primeiroAtendimento?.['Data/Hora'] || row['Data/Hora'];
 
       await sheets.appendRow('conversoes', {
         'Data/Hora': dataClassificacao,

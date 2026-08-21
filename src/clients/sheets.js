@@ -25,6 +25,15 @@ const SHEETS = {
       'Data/Hora', 'Marca', 'Unidade', 'Atendente', 'Lead', 'Canal',
       'Status (Atendido/Fechado)', 'Horário 1ª Resposta', 'Session ID (GymBot)',
       'Contact ID (GymBot)',
+      // Novo / Recorrente — se já existia algum atendimento anterior pra este
+      // mesmo Contact ID quando este foi registrado. Base para entender, ao
+      // longo do tempo, quanto de conversao vem de lead reativado (impactado
+      // de novo por um anuncio meses depois, por exemplo) versus lead que
+      // fechou no primeiro contato. So calculado com confianca em tempo real
+      // (webhook chega em ordem cronologica); na importacao historica fica em
+      // branco quando a ordem de processamento nao garante a classificacao
+      // correta (ver comentario em scripts/import-history.js).
+      'Classificação do Lead',
     ],
   },
   conversoes: {
@@ -234,4 +243,35 @@ async function replaceAll(sheetKey, rowsObjects) {
   });
 }
 
-module.exports = { SHEETS, appendRow, readAll, updateRow, findRowByColumn, buildIndex, replaceAll };
+// Como findRowByColumn, mas quando pode haver MAIS DE UMA linha com o
+// mesmo valor na coluna (ex: varios atendimentos do mesmo Contact ID) e o
+// que importa e a mais ANTIGA por data — nao a primeira em ordem de
+// insercao na planilha (que so coincide com ordem cronologica quando os
+// dados sempre chegam em tempo real; a importacao historica pagina do mais
+// novo pro mais antigo, entao a ordem de insercao pode nao ser a ordem
+// cronologica real). Usado para achar a data do PRIMEIRO atendimento de um
+// lead, base do calculo de "Dias ate Conversao" — precisa ser a data real
+// mais antiga, nao "a que apareceu primeiro na planilha".
+async function findEarliestRowByColumn(sheetKey, matchHeader, matchValue, dateHeader) {
+  if (!matchValue) return null;
+  const rows = await readAll(sheetKey);
+  const candidatas = rows.filter((r) => r[matchHeader] === matchValue);
+  if (!candidatas.length) return null;
+
+  let earliest = null;
+  let earliestTime = Infinity;
+  candidatas.forEach((r) => {
+    const t = r[dateHeader] ? new Date(r[dateHeader]).getTime() : NaN;
+    if (!Number.isNaN(t) && t < earliestTime) {
+      earliestTime = t;
+      earliest = r;
+    }
+  });
+  // Se nenhuma candidata tinha data valida (nao deveria acontecer, mas por
+  // seguranca), devolve a primeira encontrada em vez de nada.
+  return earliest || candidatas[0];
+}
+
+module.exports = {
+  SHEETS, appendRow, readAll, updateRow, findRowByColumn, findEarliestRowByColumn, buildIndex, replaceAll,
+};

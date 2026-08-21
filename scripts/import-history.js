@@ -60,10 +60,51 @@ async function importarLead(session, leadsIndex) {
   leadsIndex.set(contact.id, row);
 }
 
+// Devolve, dentre as linhas de atendimento ja conhecidas em memoria (index
+// carregado no inicio + o que ja foi importado nesta execucao), a de data
+// mais antiga para um Contact ID — usado tanto pra classificar Novo x
+// Recorrente quanto pra achar a data do primeiro atendimento (origem do
+// calculo de "Dias ate Conversao"). Le do Map em memoria em vez da planilha
+// pra nao gastar leitura extra da API por sessao.
+function primeiroAtendimentoDoContato(contactId, atendimentosIndex) {
+  if (!contactId) return null;
+  let earliest = null;
+  let earliestTime = Infinity;
+  atendimentosIndex.forEach((row) => {
+    if (row['Contact ID (GymBot)'] !== contactId) return;
+    const t = row['Data/Hora'] ? new Date(row['Data/Hora']).getTime() : NaN;
+    if (!Number.isNaN(t) && t < earliestTime) {
+      earliestTime = t;
+      earliest = row;
+    }
+  });
+  return earliest;
+}
+
 async function importarAtendimento(session, atendimentosIndex) {
   const existente = atendimentosIndex.get(session.id);
   if (existente) return existente;
   const { marca, unidade } = resolveMarcaUnidade(session.contactDetails?.tagsId || []);
+
+  // Novo x Recorrente — mesma logica de processSessionNew (tempo real),
+  // mas com uma ressalva importante aqui: a importacao pagina do mais novo
+  // pro mais antigo (ver comentario no topo do arquivo), entao a ordem em
+  // que as sessoes de um mesmo Contact ID sao processadas NESTA execucao
+  // nao e necessariamente a ordem cronologica real. Classificar com base
+  // em "ja vi este contato antes nesta importacao" classificaria a sessao
+  // mais recente como "Novo" e a mais antiga (processada depois) como
+  // "Recorrente" — o contrario do correto. Por isso, na importacao
+  // historica, so classificamos quando o contato JA tinha atendimento
+  // registrado ANTES desta execucao comecar (indice carregado no inicio,
+  // que reflete dado real de tempo real/execucoes anteriores, sempre
+  // cronologico) — nesse caso e seguramente "Recorrente". Fora isso, fica
+  // em branco em vez de arriscar uma classificacao errada.
+  const contactId = session.contactDetails?.id || '';
+  const jaTinhaAntesDestaExecucao = contactId
+    ? primeiroAtendimentoDoContato(contactId, atendimentosIndex) !== null
+    : false;
+  const classificacaoLead = jaTinhaAntesDestaExecucao ? 'Recorrente' : '';
+
   const row = {
     'Data/Hora': session.createdAt || '',
     Marca: marca || '',
@@ -74,7 +115,8 @@ async function importarAtendimento(session, atendimentosIndex) {
     'Status (Atendido/Fechado)': 'Atendido',
     'Horário 1ª Resposta': '',
     'Session ID (GymBot)': session.id,
-    'Contact ID (GymBot)': session.contactDetails?.id || '',
+    'Contact ID (GymBot)': contactId,
+    'Classificação do Lead': classificacaoLead,
   };
   await sheets.appendRow('atendimentos', row);
   atendimentosIndex.set(session.id, row);
@@ -83,14 +125,24 @@ async function importarAtendimento(session, atendimentosIndex) {
 
 // So chamado para a fracao de sessoes que de fato converteram — por isso
 // pode dar 1-2 leituras pontuais na API sem risco de estourar a cota.
-async function importarConversao(session, avaliacoesIndex, conversoesIndex) {
+async function importarConversao(session, avaliacoesIndex, conversoesIndex, atendimentosIndex) {
   const category = session.classification?.category;
   if (category !== config.classificationSuccessCategory) return;
   if (conversoesIndex.has(session.id)) return;
 
   const { marca, unidade } = resolveMarcaUnidade(session.contactDetails?.tagsId || []);
   const dataClassificacao = session.updatedAt || session.createdAt || nowLocal().toISO();
-  const dataOrigemLead = session.contactDetails?.createdAt;
+  // Origem do calculo de "Dias ate Conversao": data do PRIMEIRO atendimento
+  // deste lead (nao a data de criacao do contato no GymBot, e nao
+  // necessariamente esta sessao) — e o que de fato mede "quanto tempo o
+  // lead levou pra virar cliente", incluindo o caso de reativacao (primeiro
+  // atendimento sem fechar, lead volta meses depois e fecha). Cai pra
+  // contactDetails.createdAt so se nao acharmos nenhum atendimento anterior
+  // em memoria (ex: primeira sessao deste lead, ainda sendo processada
+  // agora — importarAtendimento roda antes desta funcao, entao a propria
+  // sessao atual ja esta no indice quando chegamos aqui).
+  const primeiroAtendimento = primeiroAtendimentoDoContato(session.contactDetails?.id, atendimentosIndex);
+  const dataOrigemLead = primeiroAtendimento?.['Data/Hora'] || session.contactDetails?.createdAt;
 
   await sheets.appendRow('conversoes', {
     'Data/Hora': dataClassificacao,
@@ -236,7 +288,7 @@ async function run() {
         }
 
         // eslint-disable-next-line no-await-in-loop
-        await importarConversao(session, avaliacoesIndex, conversoesIndex);
+        await importarConversao(session, avaliacoesIndex, conversoesIndex, atendimentosIndex);
 
         totalProcessadas += 1;
         logger.info(`[import-history] Sessao ${session.id} processada (${totalProcessadas} no total).`);

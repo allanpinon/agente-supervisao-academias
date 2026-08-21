@@ -15,12 +15,17 @@ const { evaluateAndRecordSession } = require('./evaluate');
 const logger = require('../utils/logger');
 
 async function processSessionNew(session) {
+  // Uma leitura so da planilha cobre as duas checagens abaixo (duplicidade
+  // de SESSION_NEW e classificacao Novo/Recorrente) — evita 2 leituras
+  // separadas da API do Sheets pro mesmo evento.
+  const atendimentosAtuais = await sheets.readAll('atendimentos');
+
   // SESSION_NEW pode chegar duplicado (reenvio de webhook do GymBot, ou
   // via o fallback de processSessionComplete quando a linha original nao
   // e encontrada) — confirmado em dado real da planilha (mesma Session ID
   // aparecendo duas vezes em "Atendimentos"). Sem essa checagem, cada
   // entrega duplicada virava uma linha nova.
-  const existente = await sheets.findRowByColumn('atendimentos', 'Session ID (GymBot)', session.id);
+  const existente = atendimentosAtuais.find((r) => r['Session ID (GymBot)'] === session.id);
   if (existente) {
     logger.info(`[processSession] Atendimento da sessao ${session.id} ja registrado (linha ${existente._rowNumber}) — SESSION_NEW duplicado, ignorando.`);
     return;
@@ -31,6 +36,22 @@ async function processSessionNew(session) {
   const contactDetails = await flwchat.ensureContactDetails(session, logger);
   const atendente = await flwchat.resolveAgentName(session, logger);
   const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
+
+  // Novo x Recorrente: o GymBot reaproveita o mesmo Contact ID pro mesmo
+  // numero de WhatsApp mesmo que a pessoa reapareca meses depois (via um
+  // anuncio diferente, por exemplo) — confirmado pelo usuario. Em tempo
+  // real os eventos chegam em ordem cronologica, entao "ja existe algum
+  // atendimento anterior com este Contact ID" e um jeito confiavel de saber
+  // se esta e a primeira vez que esta pessoa fala com a gente ou se e uma
+  // reativacao. Isso ainda nao muda o relatorio — e a base de dado que vai
+  // se acumulando pra, mais pra frente, dar pra medir esse padrao (lead que
+  // nao fecha na hora mas volta e fecha depois).
+  let classificacaoLead = '';
+  if (contactDetails?.id) {
+    const atendimentoAnterior = atendimentosAtuais.find((r) => r['Contact ID (GymBot)'] === contactDetails.id);
+    classificacaoLead = atendimentoAnterior ? 'Recorrente' : 'Novo';
+  }
+
   const row = {
     'Data/Hora': session.createdAt || nowLocal().toISO(),
     Marca: marca || '',
@@ -42,6 +63,7 @@ async function processSessionNew(session) {
     'Horário 1ª Resposta': '',
     'Session ID (GymBot)': session.id,
     'Contact ID (GymBot)': contactDetails?.id || '',
+    'Classificação do Lead': classificacaoLead,
   };
   await sheets.appendRow('atendimentos', row);
   logger.info(`[processSession] Novo atendimento registrado: sessao ${session.id}`);

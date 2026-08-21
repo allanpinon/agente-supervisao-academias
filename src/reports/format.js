@@ -54,7 +54,7 @@ function formatReport({ marca, tipoLabel, dataLabel, data, sinteses }) {
   return (
     `📋 *${marca} — Relatório ${tipoLabel}* — ${dataLabel}\n\n` +
     `*QUANTITATIVO*\n` +
-    `Leads novos: ${data.leadsTotal} (${data.pagos} pagos / ${data.organicos} orgânicos)\n` +
+    `Leads novos: ${data.leadsTotal}\n` +
     `Canal: ${canalTexto || '—'}\n\n` +
     `Por unidade:\n${linhasUnidade || '—'}\n\n` +
     `Por atendente:\n${linhasAtendenteQuant || '—'}\n\n` +

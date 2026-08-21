@@ -47,6 +47,13 @@ async function computeReportData(marca, { start, end }) {
     (v) => v.Marca === marca && inRange(v['Data/Hora'], start, end)
   );
 
+  // Calculado mas, por decisao explicita do usuario, NAO aparece mais no
+  // texto do relatorio (ver src/reports/format.js) — o numero de "pago vs
+  // organico" daqui nao bate com o gerenciador de anuncios (a origem que a
+  // tag do GymBot registra nao e confiavel o suficiente pra essa comparacao)
+  // e mostrar isso no relatorio gerava duvida sobre o desempenho real do
+  // trafego pago. Mantido aqui (nao removido da planilha/calculo) caso
+  // sirva de referencia interna futura, so nao e mais exibido.
   const pagos = leadsUnicos.filter((l) => l['Origem (Paga/Orgânica)'] === 'Paga').length;
   const organicos = leadsUnicos.length - pagos;
 

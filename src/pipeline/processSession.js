@@ -74,7 +74,8 @@ async function processSessionComplete(session) {
   // antes de avaliar, pra ter certeza que temos contactDetails/agentDetails.
   const fullSession = await flwchat.getSession(session.id);
   fullSession.contactDetails = await flwchat.ensureContactDetails(fullSession, logger);
-  fullSession.agentDetails = { ...(fullSession.agentDetails || {}), name: await flwchat.resolveAgentName(fullSession, logger) };
+  const atendenteResolvido = await flwchat.resolveAgentName(fullSession, logger);
+  fullSession.agentDetails = { ...(fullSession.agentDetails || {}), name: atendenteResolvido };
 
   await evaluateAndRecordSession(fullSession);
 
@@ -88,9 +89,24 @@ async function processSessionComplete(session) {
     return;
   }
 
+  // BUG CORRIGIDO: ate aqui, este UPDATE so tocava em "Status", jogando fora
+  // o contactDetails/atendente que acabaram de ser resolvidos (linhas acima)
+  // com dado fresco da API. Na pratica isso fazia a linha de Atendimentos
+  // ficar com Marca/Unidade/Atendente/Lead/Contact ID em branco pra sempre
+  // sempre que esses dados nao estavam disponiveis ja no SESSION_NEW (ex:
+  // atendente so e atribuida depois que alguem realmente assume a conversa)
+  // — mesmo a avaliacao (Avaliações) saindo correta, porque evaluateAndRecordSession
+  // usa esse mesmo dado fresco pra gravar a propria linha dela. So preenche
+  // campo que ainda estiver vazio; nunca sobrescreve valor ja gravado.
+  const { marca, unidade } = resolveMarcaUnidade(fullSession.contactDetails?.tagsId || []);
   await sheets.updateRow('atendimentos', existing._rowNumber, {
     ...existing,
     'Status (Atendido/Fechado)': 'Atendido',
+    Marca: existing.Marca || marca || '',
+    Unidade: existing.Unidade || unidade || '',
+    Atendente: existing.Atendente || atendenteResolvido || '',
+    Lead: existing.Lead || fullSession.contactDetails?.name || '',
+    'Contact ID (GymBot)': existing['Contact ID (GymBot)'] || fullSession.contactDetails?.id || '',
   });
   logger.info(`[processSession] Atendimento concluido: sessao ${session.id}`);
 }

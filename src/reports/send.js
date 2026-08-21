@@ -22,8 +22,15 @@ function periodoDeTipo(tipo) {
   return todayRange();
 }
 
-async function gravarSinteses(marca, tipo, sinteses) {
-  const dataPeriodo = nowLocal().toFormat('yyyy-MM-dd');
+async function gravarSinteses(marca, tipo, sinteses, periodo) {
+  // "Data do Período" precisa refletir o periodo que o relatorio esta
+  // cobrindo, nao o instante em que o processamento rodou — pro diario
+  // isso da no mesmo (o periodo comeca hoje), mas pra um relatorio gerado
+  // manualmente pra uma data passada (ver scripts/run-report.js) usar
+  // nowLocal() gravaria a data de HOJE (quando o script rodou) numa
+  // sintese que na verdade e sobre outro dia, o que confundiria qualquer
+  // consulta futura nessa planilha.
+  const dataPeriodo = periodo.start.toFormat('yyyy-MM-dd');
   for (const { atendente, convertidos, naoConvertidos } of sinteses) {
     if (convertidos) {
       // eslint-disable-next-line no-await-in-loop
@@ -58,7 +65,13 @@ async function gravarSinteses(marca, tipo, sinteses) {
   }
 }
 
-async function generateAndSendReports(tipo) {
+// `options.periodo` e `options.dataLabel` permitem gerar um relatorio pra
+// uma data que NAO seja hoje (ver scripts/run-report.js) — usado pra testar
+// o pipeline inteiro (varredura + calculo + sintese + envio) contra dado
+// real de um dia especifico, sem esperar o agendamento do node-cron.
+// Sem overrides (uso normal, via src/jobs/scheduler.js), o comportamento
+// e identico ao de antes.
+async function generateAndSendReports(tipo, options = {}) {
   logger.info(`[reports] Iniciando geracao do relatorio ${tipo}...`);
 
   // A varredura de reconciliacao NAO pode travar o relatorio inteiro se
@@ -68,18 +81,22 @@ async function generateAndSendReports(tipo) {
   // tentar enviar qualquer coisa pras duas marcas — e por estar fora de
   // qualquer try/catch, o erro tambem podia derrubar o processo inteiro
   // do servico (o agendamento do node-cron nao trata erro sozinho).
-  try {
-    await runReconciliationSweep();
-  } catch (err) {
-    logger.error(
-      `[reports] Varredura de reconciliacao falhou — seguindo para gerar o relatorio ${tipo} ` +
-      `mesmo assim (os numeros de conversao podem estar desatualizados ate a proxima varredura ` +
-      `bem-sucedida): ${err.message}`
-    );
+  if (options.skipSweep) {
+    logger.info(`[reports] skipSweep ativo — pulando varredura de reconciliacao para o relatorio ${tipo}.`);
+  } else {
+    try {
+      await runReconciliationSweep();
+    } catch (err) {
+      logger.error(
+        `[reports] Varredura de reconciliacao falhou — seguindo para gerar o relatorio ${tipo} ` +
+        `mesmo assim (os numeros de conversao podem estar desatualizados ate a proxima varredura ` +
+        `bem-sucedida): ${err.message}`
+      );
+    }
   }
 
-  const periodo = periodoDeTipo(tipo);
-  const dataLabel = nowLocal().toFormat('dd/MM/yyyy');
+  const periodo = options.periodo || periodoDeTipo(tipo);
+  const dataLabel = options.dataLabel || nowLocal().toFormat('dd/MM/yyyy');
 
   for (const marca of config.marcas) {
     try {
@@ -99,7 +116,7 @@ async function generateAndSendReports(tipo) {
       // eslint-disable-next-line no-await-in-loop
       const sinteses = await synthesizeAttendants(data.porAtendente, TIPO_LABELS[tipo], manualContext);
       // eslint-disable-next-line no-await-in-loop
-      await gravarSinteses(marca, tipo, sinteses);
+      await gravarSinteses(marca, tipo, sinteses, periodo);
       const texto = formatReport({ marca, tipoLabel: TIPO_LABELS[tipo], dataLabel, data, sinteses });
       // eslint-disable-next-line no-await-in-loop
       await evolution.sendGroupMessage(marca, texto);

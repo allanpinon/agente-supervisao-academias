@@ -106,7 +106,13 @@ async function run() {
   if (dryRun) {
     candidatas.forEach((r) => {
       const faltando = CAMPOS_REPARAVEIS.filter((c) => !r[c]);
-      const fonte = avaliacaoPorSessao.has(r['Session ID (GymBot)']) ? 'Avaliações' : 'API GymBot';
+      const avaliacao = avaliacaoPorSessao.get(r['Session ID (GymBot)']) || null;
+      // Mesma logica campo-a-campo usada no reparo de verdade (ver acima) —
+      // so diz "Avaliações" se ela realmente cobre tudo que falta.
+      const precisaApiPreview = !avaliacao
+        || !r['Contact ID (GymBot)']
+        || CAMPOS_REPARAVEIS.some((campo) => campo !== 'Contact ID (GymBot)' && !r[campo] && !avaliacao[campo]);
+      const fonte = precisaApiPreview ? 'API GymBot' : 'Avaliações';
       logger.info(`[repair-atendimentos] (dry-run) linha ${r._rowNumber}, sessao ${r['Session ID (GymBot)']} — faltando: ${faltando.join(', ')} — fonte: ${fonte}`);
     });
     logger.info('[repair-atendimentos] Dry-run concluido — nenhuma linha foi alterada.');
@@ -124,10 +130,18 @@ async function run() {
     try {
       const avaliacao = avaliacaoPorSessao.get(sessionId) || null;
 
-      // So consulta a API do GymBot quando precisar (nao ha avaliacao
-      // correspondente cobrindo Marca/Unidade/Atendente/Lead, ou falta o
-      // Contact ID, que a planilha de Avaliações nunca tem).
-      const precisaApi = !avaliacao || !candidata['Contact ID (GymBot)'];
+      // So consulta a API do GymBot quando precisar de verdade: campo por
+      // campo, nao "existe avaliacao? entao chega". BUG JA CORRIGIDO NESTE
+      // SCRIPT (21/08/2026): a versao anterior pulava a API sempre que
+      // havia QUALQUER avaliacao correspondente — mas Marca/Unidade em
+      // Avaliações estavam 100% em branco ate agora (ver correcao em
+      // src/clients/flwchat.js), entao pra essas linhas o reparo nao
+      // reparava nada. Agora so pula a API se avaliacao+linha atual juntas
+      // ja cobrem TODOS os campos reparaveis (exceto Contact ID, que
+      // Avaliações nunca tem e por isso sempre exige a API quando faltar).
+      const precisaApi = !avaliacao
+        || !candidata['Contact ID (GymBot)']
+        || CAMPOS_REPARAVEIS.some((campo) => campo !== 'Contact ID (GymBot)' && !candidata[campo] && !avaliacao[campo]);
       let contactDetails = null;
       let atendenteApi = '';
       let marcaApi = '';

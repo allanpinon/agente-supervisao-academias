@@ -22,7 +22,9 @@ function formatReport({ marca, tipoLabel, dataLabel, data, sinteses }) {
     : 'sem conversões no período';
 
   const blocosQualitativos = sinteses
-    .map(({ atendente, convertidos, naoConvertidos }) => {
+    .map(({
+      atendente, convertidos, naoConvertidos, emAberto,
+    }) => {
       const partes = [`*${atendente}*`];
 
       if (convertidos) {
@@ -43,7 +45,19 @@ function formatReport({ marca, tipoLabel, dataLabel, data, sinteses }) {
         );
       }
 
-      if (!convertidos && !naoConvertidos) {
+      // "Em aberto": lead ainda sem decisao — a maioria no relatorio
+      // diario. Sem isso, o relatorio diario quase sempre ficava sem
+      // nenhuma leitura qualitativa (ver src/reports/compute.js).
+      if (emAberto) {
+        const padroes = emAberto.padroes?.length ? emAberto.padroes.join(', ') : '—';
+        partes.push(
+          `🔎 Atendimentos em aberto (ainda sem resultado): ${emAberto.resumo}\n` +
+          `Padrões: ${padroes}\n` +
+          `Ajustar: ${emAberto.recomendacao}`
+        );
+      }
+
+      if (!convertidos && !naoConvertidos && !emAberto) {
         partes.push('Sem atendimentos com resultado definido neste período.');
       }
 

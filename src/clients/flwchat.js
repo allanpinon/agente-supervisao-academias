@@ -104,8 +104,30 @@ function extractContactId(session) {
   );
 }
 
+// BUG REAL ENCONTRADO E CORRIGIDO (21/08/2026): esta funcao decidia "ja
+// tenho dado suficiente, nao precisa buscar o contato de novo" se
+// contactDetails tivesse OU tagsId OU nome — mas o payload da sessao
+// (tanto no webhook quanto em GET /v2/session/{id}) costuma trazer o nome
+// do contato mesmo quando ainda nao tem NENHUMA tag preenchida (a tag de
+// marca/unidade normalmente so e aplicada depois, as vezes so quando a
+// sessao ja esta perto de ser concluida). Como o nome sozinho ja satisfazia
+// a condicao (OR), a busca real do contato (GET /core/v1/contact/{id}, que
+// traria as tags atualizadas) NUNCA acontecia nesses casos — e isso incluia
+// literalmente TODA avaliacao gravada em evaluateAndRecordSession, porque
+// nesse ponto do fluxo (SESSION_COMPLETE) o nome do contato quase sempre ja
+// esta presente. Resultado confirmado com dado real: Marca ficou em branco
+// em 100% das linhas ja gravadas em "Avaliações" (203/203) — o que por sua
+// vez fazia o filtro por marca em src/reports/compute.js (avaliacoesMarca =
+// avaliacoes.filter(v => v.Marca === marca)) nunca encontrar NADA, e por
+// isso a sintese qualitativa do relatorio sempre saia vazia ("Sem
+// atendimentos com resultado definido"), mesmo com avaliacoes reais
+// gravadas. Tambem explicava boa parte (nao toda) do numero baixo de
+// "atendidos" por unidade. Corrigido: so consideramos o dado ja usavel
+// quando as TAGS (tagsId) ja estao presentes — nome sozinho, sem tags, nao
+// e mais suficiente, entao a busca real do contato acontece sempre que as
+// tags ainda nao vieram, mesmo que o nome ja esteja disponivel.
 function hasUsableContactDetails(contactDetails) {
-  return Boolean(contactDetails && ((contactDetails.tagsId && contactDetails.tagsId.length) || contactDetails.name));
+  return Boolean(contactDetails && contactDetails.tagsId && contactDetails.tagsId.length);
 }
 
 async function ensureContactDetails(session, logger) {

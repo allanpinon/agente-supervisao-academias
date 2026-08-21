@@ -31,7 +31,9 @@ async function gravarSinteses(marca, tipo, sinteses, periodo) {
   // sintese que na verdade e sobre outro dia, o que confundiria qualquer
   // consulta futura nessa planilha.
   const dataPeriodo = periodo.start.toFormat('yyyy-MM-dd');
-  for (const { atendente, convertidos, naoConvertidos } of sinteses) {
+  for (const {
+    atendente, convertidos, naoConvertidos, emAberto,
+  } of sinteses) {
     if (convertidos) {
       // eslint-disable-next-line no-await-in-loop
       await sheets.appendRow('sinteses', {
@@ -60,6 +62,21 @@ async function gravarSinteses(marca, tipo, sinteses, periodo) {
         'Pontos Fracos Consolidados': (naoConvertidos.padroes || []).join('; '),
         'Sugestão de Melhoria': naoConvertidos.recomendacao,
         Resultado: 'Não convertido',
+      });
+    }
+    if (emAberto) {
+      // eslint-disable-next-line no-await-in-loop
+      await sheets.appendRow('sinteses', {
+        'Data do Período': dataPeriodo,
+        'Tipo (Diário/Semanal/Mensal)': TIPO_LABELS[tipo],
+        Marca: marca,
+        Atendente: atendente,
+        'Avaliação Geral': emAberto.resumo,
+        'Volume de Objeções': '',
+        'Pontos Fortes Consolidados': '',
+        'Pontos Fracos Consolidados': (emAberto.padroes || []).join('; '),
+        'Sugestão de Melhoria': emAberto.recomendacao,
+        Resultado: 'Em aberto',
       });
     }
   }

@@ -102,10 +102,19 @@ async function computeReportData(marca, { start, end }) {
     );
     const conversao = atendidosA.length ? (fechadosA.length / atendidosA.length) * 100 : 0;
     const avaliacoesA = avaliacoesMarca.filter((v) => v.Atendente === atendente);
-    // Separadas por resultado — "Em aberto" fica de fora da comparacao
-    // qualitativa (ainda nao sabemos se vai converter ou nao).
+    // Separadas por resultado. "Em aberto" (atendimento feito, lead ainda
+    // sem decisao) ENTRA na sintese qualitativa tambem — decisao explicita
+    // do usuario (21/08/2026): a avaliacao da qualidade do atendimento em
+    // si (cordialidade, personalizacao, clareza, tratamento de objecoes,
+    // tentativa de fechamento) nao deveria esperar o lead converter ou nao
+    // pra existir, principalmente no relatorio diario, onde a imensa
+    // maioria dos atendimentos do proprio dia ainda esta "Em aberto" (a
+    // varredura de reconciliacao so classifica depois). Antes disso, o
+    // relatorio diario praticamente nunca tinha nada pra mostrar na parte
+    // qualitativa, mesmo com avaliacoes reais gravadas.
     const avaliacoesConvertidas = avaliacoesA.filter((v) => v.Resultado === 'Convertido');
     const avaliacoesNaoConvertidas = avaliacoesA.filter((v) => v.Resultado === 'Não convertido');
+    const avaliacoesEmAberto = avaliacoesA.filter((v) => v.Resultado === 'Em aberto' || !v.Resultado);
     return {
       atendente,
       atendidos: atendidosA.length,
@@ -113,6 +122,7 @@ async function computeReportData(marca, { start, end }) {
       conversaoPercent: conversao,
       avaliacoesConvertidas,
       avaliacoesNaoConvertidas,
+      avaliacoesEmAberto,
     };
   });
 

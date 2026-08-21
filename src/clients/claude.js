@@ -97,7 +97,7 @@ const SEGMENT_TOOL = {
       },
       recomendacao: {
         type: 'string',
-        description: 'Uma recomendacao pratica: reforcar (se convertido) ou corrigir (se nao convertido)',
+        description: 'Uma recomendacao pratica: reforcar (se convertido), corrigir (se nao convertido), ou ajustar (se em aberto)',
       },
     },
     required: ['resumo', 'padroes', 'recomendacao'],
@@ -118,12 +118,26 @@ async function synthesizeSegment(atendente, periodo, resultado, avaliacoes, manu
       `pontos fortes: ${a['Pontos Fortes']}, pontos fracos: ${a['Pontos Fracos']}`)
     .join('\n');
 
-  const foco = resultado === 'convertido'
-    ? 'Estes atendimentos RESULTARAM EM CONVERSAO (o lead virou cliente). Identifique os ' +
+  let foco;
+  if (resultado === 'convertido') {
+    foco = 'Estes atendimentos RESULTARAM EM CONVERSAO (o lead virou cliente). Identifique os ' +
       'padroes de comportamento da atendente que contribuiram para esse sucesso, para que ' +
-      'sejam reforcados e replicados nos proximos atendimentos.'
-    : 'Estes atendimentos NAO resultaram em conversao (dentro da janela analisada). ' +
+      'sejam reforcados e replicados nos proximos atendimentos.';
+  } else if (resultado === 'nao_convertido') {
+    foco = 'Estes atendimentos NAO resultaram em conversao (dentro da janela analisada). ' +
       'Identifique os principais pontos de travamento ou oportunidades perdidas, para correcao.';
+  } else {
+    // 'em_aberto': atendimento feito, lead ainda sem decisao (comum no
+    // relatorio diario, antes da varredura de reconciliacao classificar).
+    // Sem desfecho pra julgar, a analise foca na QUALIDADE do atendimento
+    // em si — nao invente um resultado que ainda nao existe.
+    foco = 'Estes atendimentos AINDA NAO TEM RESULTADO DEFINIDO (o lead nem converteu nem foi ' +
+      'descartado ate agora — pode fechar mais adiante). Sem um desfecho pra julgar, avalie a ' +
+      'QUALIDADE do atendimento em si (cordialidade, personalizacao, clareza da oferta, ' +
+      'tratamento de objecoes, tentativa de fechamento/CTA, follow-up) — o que ja esta bom pra ' +
+      'manter, e o que pode ser ajustado enquanto a conversa ainda esta em curso. Nao presuma se ' +
+      'vai converter ou nao.';
+  }
 
   const contextoManual = manualContext
     ? `\n\nManual de Boas Praticas atual desta marca (use como referencia: aponte se os ` +

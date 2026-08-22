@@ -148,7 +148,26 @@ async function generateAndSendReports(tipo, options = {}) {
         }
       }
     } catch (err) {
-      logger.error(`[reports] Erro ao gerar/enviar relatorio ${tipo} de ${marca}:`, err.message);
+      // Log generico so dizia "Request failed with status code 401" sem
+      // dizer QUAL chamada (Sheets, Claude ou Evolution) falhou — dentro
+      // deste try tem tres clientes de API diferentes (computeReportData /
+      // synthesizeAttendants / gravarSinteses / evolution.sendGroupMessage),
+      // cada um com o proprio formato de erro (axios usa err.response.status
+      // + err.config.url; o SDK da Anthropic usa err.status direto, sem
+      // err.response — ver mesmo problema documentado em src/utils/retry.js).
+      // Sem isso, um 401 fica ambiguo entre "ANTHROPIC_API_KEY invalida" e
+      // "EVOLUTION_API_KEY/EVOLUTION_INSTANCE invalida", que sao problemas
+      // completamente diferentes de resolver.
+      const status = err.response?.status || err.status || '';
+      const url = err.config?.url
+        ? `${err.config.baseURL || ''}${err.config.url}`
+        : (err.request?.path || '');
+      const detalhes = [
+        err.message,
+        status ? `status ${status}` : null,
+        url ? `url ${url}` : null,
+      ].filter(Boolean).join(' | ');
+      logger.error(`[reports] Erro ao gerar/enviar relatorio ${tipo} de ${marca}: ${detalhes}`);
     }
   }
 }

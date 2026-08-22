@@ -7,7 +7,7 @@ const flwchat = require('../clients/flwchat');
 const claude = require('../clients/claude');
 const sheets = require('../clients/sheets');
 const { formatTranscript } = require('../utils/transcript');
-const { resolveMarcaUnidade, extractTagsId } = require('../utils/tags');
+const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../utils/tags');
 const { nowLocal } = require('../utils/dates');
 const { getLatestManual } = require('../reports/manual');
 const logger = require('../utils/logger');
@@ -40,7 +40,11 @@ async function evaluateAndRecordSession(session) {
   const contactDetails = await flwchat.ensureContactDetails(session, logger);
   // Mesma logica para o nome da atendente — ver flwchat.resolveAgentName.
   const atendente = await flwchat.resolveAgentName(session, logger);
-  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
+  const { marca: marcaTag, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
+  // Marca padronizada pela atendente (config.atendenteMarca) tem
+  // prioridade sobre a tag — ver comentario equivalente em
+  // src/pipeline/processSession.js.
+  const marca = resolveMarcaPorAtendente(atendente) || marcaTag;
 
   let manualAtual = null;
   if (marca) {

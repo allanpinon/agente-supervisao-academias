@@ -17,8 +17,9 @@
 const flwchat = require('../clients/flwchat');
 const sheets = require('../clients/sheets');
 const { config } = require('../config');
-const { resolveMarcaUnidade, extractTagsId } = require('../utils/tags');
+const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../utils/tags');
 const { nowLocal, diffInDays } = require('../utils/dates');
+const { evaluateAndRecordSession } = require('../pipeline/evaluate');
 const logger = require('../utils/logger');
 
 async function marcarResultadoAvaliacao(sessionId, resultado) {
@@ -72,6 +73,35 @@ async function runReconciliationSweep() {
       continue;
     }
 
+    // Fecha a leitura QUALITATIVA de todo atendimento pendente, independente
+    // do status atual (Em andamento/Atendido) — pedido explicito do usuario
+    // (22/08/2026): "o qualitativo precisa ser fechado independente do
+    // status atual". Antes desta correcao, um atendimento so ganhava uma
+    // linha em Avaliações quando o SESSION_COMPLETE do GymBot chegava (ver
+    // src/pipeline/processSession.js) — se isso ainda nao tivesse
+    // acontecido no momento do relatorio (sessao ainda "Em andamento", ex:
+    // atendente ainda nao assumiu a conversa, ou o evento simplesmente
+    // ainda nao chegou), o atendimento ficava com dado quantitativo
+    // (aparecia em "Por atendente"/totais) mas NENHUM dado qualitativo —
+    // nem "Convertido"/"Nao convertido" nem "Em aberto", pois nao existia
+    // linha nenhuma em Avaliações pra ele (achado real ao investigar por
+    // que a Samia Borges aparecia sem secao qualitativa em 20/08/2026).
+    // evaluateAndRecordSession ja e idempotente (verifica se ja existe
+    // avaliacao pra esta Session ID antes de gastar qualquer chamada —
+    // Claude incluida — e ja tolera sessao sem mensagem alguma, retornando
+    // sem gravar nada), entao chamar aqui pra toda sessao pendente e seguro
+    // e so gera uma avaliacao nova de fato na primeira vez que a sessao e
+    // vista sem uma. Ressalva: se a sessao ainda estiver "Em andamento" e a
+    // conversa continuar depois deste ponto, a avaliacao gravada agora fica
+    // baseada no transcript parcial ate aqui — nao e re-executada
+    // automaticamente depois (mesma limitacao, documentada, do desenho
+    // atual de "uma avaliacao por sessao").
+    try {
+      await evaluateAndRecordSession(session);
+    } catch (err) {
+      logger.warn(`[sweep] Falha ao gerar avaliacao qualitativa da sessao ${sessionId}: ${err.message}`);
+    }
+
     const category = session.classification?.category;
     if (category !== config.classificationSuccessCategory) continue;
 
@@ -82,7 +112,12 @@ async function runReconciliationSweep() {
       // valor ja gravado em Atendimentos, caso nem o reforco encontre nada.
       const contactDetails = await flwchat.ensureContactDetails(session, logger);
       const atendente = await flwchat.resolveAgentName(session, logger);
-      const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
+      const { marca: marcaTag, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
+      // Marca padronizada pela atendente (config.atendenteMarca) tem
+      // prioridade sobre a tag — ver comentario equivalente em
+      // src/pipeline/processSession.js.
+      const marcaResolvida = resolveMarcaPorAtendente(atendente) || resolveMarcaPorAtendente(row.Atendente);
+      const marca = marcaResolvida || marcaTag;
       const dataClassificacao = session.updatedAt || nowLocal().toISO();
       // Origem do calculo de "Dias ate Conversao": data do PRIMEIRO
       // atendimento deste lead (nao a data de criacao do contato no

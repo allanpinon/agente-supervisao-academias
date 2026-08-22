@@ -32,7 +32,7 @@
 require('dotenv').config();
 const flwchat = require('../src/clients/flwchat');
 const sheets = require('../src/clients/sheets');
-const { resolveMarcaUnidade, extractTagsId } = require('../src/utils/tags');
+const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../src/utils/tags');
 const logger = require('../src/utils/logger');
 
 const args = process.argv.slice(2);
@@ -91,7 +91,7 @@ async function run() {
       const contactDetails = await flwchat.ensureContactDetails(session, logger);
       // eslint-disable-next-line no-await-in-loop
       const atendente = await flwchat.resolveAgentName(session, logger);
-      const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
+      const { marca: marcaTag, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
 
       // Re-le a linha AGORA (nao o snapshot do inicio) — protege contra
       // corrida com uma avaliacao real acontecendo em paralelo.
@@ -110,6 +110,11 @@ async function run() {
         await sleep(DELAY_MS);
         continue;
       }
+
+      // Marca padronizada pela atendente (config.atendenteMarca) tem
+      // prioridade sobre a tag — ver comentario equivalente em
+      // src/pipeline/processSession.js.
+      const marca = resolveMarcaPorAtendente(atual.Atendente || atendente) || marcaTag;
 
       const atualizado = {
         ...atual,

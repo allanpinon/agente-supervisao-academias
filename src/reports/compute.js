@@ -6,6 +6,7 @@
 const { DateTime } = require('luxon');
 const sheets = require('../clients/sheets');
 const { config } = require('../config');
+const { resolveMarcaPorAtendente } = require('../utils/tags');
 
 function inRange(isoString, start, end) {
   if (!isoString) return false;
@@ -25,6 +26,41 @@ function uniqueBy(list, key) {
   }
   return out;
 }
+
+// Normaliza string pra comparacao (trim + minusculo) — usado SO pra
+// comparar, nunca pra exibir. Corrige um gap real encontrado em analise
+// profunda dos dados de 20/08/2026: 7 linhas de Atendimentos gravadas como
+// 'greco Forma'/'greco forma' em vez de 'Greco Forma' (origem nao
+// identificada — o codigo atual so grava a partir de config.tagMap, que
+// esta corretamente capitalizado em todo lugar; possivelmente uma
+// revisao anterior do codigo, ou uma transformacao do proprio Sheets por
+// causa do valueInputOption: 'USER_ENTERED' em src/clients/sheets.js).
+// Com comparacao EXATA (===), essas linhas eram silenciosamente
+// descartadas de TODAS as metricas do relatorio — nao apareciam em
+// nenhuma marca, mesmo tendo Marca valida (so com a grafia diferente).
+// Isso por si so ja explicava parte da diferenca entre a contagem do
+// relatorio e a contagem do proprio GymBot (56 atendimentos em
+// 20/08/2026, contra um numero menor no relatorio).
+function normalize(s) {
+  return (s || '').toString().trim().toLowerCase();
+}
+
+// Marca "efetiva" de uma linha (Leads/Atendimentos/Conversões/Avaliações):
+// quando a Atendente da linha já está no mapa fixo `config.atendenteMarca`
+// (cada atendente atende uma única marca — pedido explícito do usuário,
+// 22/08/2026: "vamos padronizar a marca pelas atendentes"), esse mapeamento
+// é usado como fonte da verdade, prevalecendo sobre o campo `Marca` gravado
+// na própria linha — mais confiável do que a tag do contato, que provou dar
+// grafia inconsistente e ficar em branco em algumas linhas mesmo com a
+// atendente já identificada (ver "Gap de contagem de 20/08/2026" na doc do
+// projeto). Cai para o campo `Marca` da própria linha quando a atendente
+// está vazia ou não está no mapa (atendente nova ainda não cadastrada aqui
+// — nesse caso é preciso atualizar `config.atendenteMarca`).
+function marcaEfetiva(row) {
+  return resolveMarcaPorAtendente(row.Atendente) || row.Marca;
+}
+
+const UNIDADE_NAO_IDENTIFICADA = 'Unidade não identificada';
 
 // Dimensoes da rubrica de excelencia (ver src/rubric.js), na mesma ordem
 // em que sao gravadas em Avaliações (ver src/pipeline/evaluate.js).
@@ -80,18 +116,47 @@ async function computeReportData(marca, { start, end }) {
     sheets.readAll('avaliacoes'),
   ]);
 
-  const leadsMarca = leads.filter((l) => l.Marca === marca && inRange(l['Data/Hora'], start, end));
+  const marcaAlvo = normalize(marca);
+  // Todos os quatro filtros comparam a Marca "efetiva" (marcaEfetiva) —
+  // padronizada pela atendente quando conhecida, com o campo Marca da
+  // própria linha (normalizado) como fallback — em vez do campo Marca cru.
+  // Ver comentário de marcaEfetiva() acima.
+  const leadsMarca = leads.filter(
+    (l) => normalize(marcaEfetiva(l)) === marcaAlvo && inRange(l['Data/Hora'], start, end)
+  );
   const leadsUnicos = uniqueBy(leadsMarca, 'Contact ID (GymBot)');
 
   const atendimentosMarca = atendimentos.filter(
-    (a) => a.Marca === marca && inRange(a['Data/Hora'], start, end)
+    (a) => normalize(marcaEfetiva(a)) === marcaAlvo && inRange(a['Data/Hora'], start, end)
   );
   const conversoesMarca = conversoes.filter(
-    (c) => c.Marca === marca && inRange(c['Data/Hora'], start, end)
+    (c) => normalize(marcaEfetiva(c)) === marcaAlvo && inRange(c['Data/Hora'], start, end)
   );
   const avaliacoesMarca = avaliacoes.filter(
-    (v) => v.Marca === marca && inRange(v['Data/Hora'], start, end)
+    (v) => normalize(marcaEfetiva(v)) === marcaAlvo && inRange(v['Data/Hora'], start, end)
   );
+
+  // Quantitativo do status REAL de cada atendimento no momento em que o
+  // relatorio fecha — pedido explicito do usuario (22/08/2026): "é bom
+  // fazer um quantitativo sobre o status real no fechamento, quantos
+  // concluídos, quantos em andamento". Conta por LINHA de atendimento
+  // (sessao), nao deduplicado por lead — um mesmo lead pode ter uma sessao
+  // concluida e outra ainda em andamento no mesmo periodo, e isso deve
+  // aparecer. "Concluído" agrega os tres status que significam que a
+  // conversa em si já terminou (Atendido/Fechado/Não convertido); só
+  // "Em andamento" fica de fora — é o único status que significa que a
+  // conversa ainda está rolando.
+  let statusEmAndamento = 0;
+  let statusConcluidos = 0;
+  atendimentosMarca.forEach((a) => {
+    if (a['Status (Atendido/Fechado)'] === 'Em andamento') statusEmAndamento += 1;
+    else statusConcluidos += 1;
+  });
+  const statusAtendimentos = {
+    concluidos: statusConcluidos,
+    emAndamento: statusEmAndamento,
+    total: atendimentosMarca.length,
+  };
 
   // Calculado mas, por decisao explicita do usuario, NAO aparece mais no
   // texto do relatorio (ver src/reports/format.js) — o numero de "pago vs
@@ -134,6 +199,41 @@ async function computeReportData(marca, { start, end }) {
       conversaoPercent: conversao,
     };
   });
+
+  // "Unidade não identificada": leads/atendimentos/conversões com Marca
+  // valida (ja normalizada acima) mas Unidade em branco ou que nao bate com
+  // nenhuma unidade conhecida de config.tagMap (contato com tag de marca
+  // mas ainda sem tag de unidade). Analise profunda de 20/08/2026 encontrou
+  // 15 linhas nessa condicao — antes desta correcao, elas contavam
+  // normalmente em "Por atendente"/nos totais gerais, mas desapareciam sem
+  // deixar rastro em "Por unidade", o que fazia a soma de "Por unidade" no
+  // relatorio nao bater com a soma de "Por atendente" (o proprio sintoma
+  // que o usuario reportou).
+  const unidadesConhecidas = new Set(unidades);
+  const leadsSemUnidade = uniqueBy(
+    leadsMarca.filter((l) => !unidadesConhecidas.has(l.Unidade)),
+    'Contact ID (GymBot)'
+  );
+  const atendidosSemUnidade = uniqueBy(
+    atendimentosMarca.filter((a) => !unidadesConhecidas.has(a.Unidade)),
+    'Contact ID (GymBot)'
+  );
+  const fechadosSemUnidade = uniqueBy(
+    conversoesMarca.filter((c) => !unidadesConhecidas.has(c.Unidade)),
+    'Contact ID (GymBot)'
+  );
+  if (leadsSemUnidade.length || atendidosSemUnidade.length || fechadosSemUnidade.length) {
+    const conversaoSemUnidade = leadsSemUnidade.length
+      ? (fechadosSemUnidade.length / leadsSemUnidade.length) * 100
+      : 0;
+    porUnidade.push({
+      unidade: UNIDADE_NAO_IDENTIFICADA,
+      leads: leadsSemUnidade.length,
+      atendidos: atendidosSemUnidade.length,
+      fechados: fechadosSemUnidade.length,
+      conversaoPercent: conversaoSemUnidade,
+    });
+  }
 
   const atendentes = [...new Set(atendimentosMarca.map((a) => a.Atendente).filter(Boolean))];
 
@@ -201,6 +301,7 @@ async function computeReportData(marca, { start, end }) {
     conversaoGeralPercent: conversaoGeral,
     tempoMedioConversaoDias: tempoMedioConversao,
     fechadosGeral: fechadosGeralUnicos,
+    statusAtendimentos,
   };
 }
 

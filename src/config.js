@@ -80,6 +80,26 @@ const config = {
   },
 
   marcas: ['Greco Forma', 'Fit.com'],
+
+  // Marca padronizada por atendente — cada atendente atende SOMENTE uma
+  // marca (2 por marca), então este mapeamento é uma fonte mais confiável
+  // pra decidir a Marca de um atendimento/avaliação do que a tag do
+  // contato: a tag pode faltar (ainda não aplicada), chegar só depois do
+  // primeiro atendimento, ou vir com grafia inconsistente — os três
+  // problemas reais encontrados na análise do gap de contagem de
+  // 20/08/2026 (ver `claude/arquitetura-agente-supervisao.md`). Usado em
+  // `src/utils/tags.js` (`resolveMarcaPorAtendente`), no pipeline de
+  // gravação (`src/pipeline/processSession.js`, `src/pipeline/evaluate.js`)
+  // e na leitura do relatório (`src/reports/compute.js`).
+  // IMPORTANTE: pedido explícito do usuário (22/08/2026) — atualizar este
+  // mapa manualmente sempre que uma atendente mudar de marca ou uma nova
+  // atendente começar a atender.
+  atendenteMarca: {
+    Maryelle: 'Greco Forma',
+    'Amanda Caroline': 'Greco Forma',
+    'Sâmia Borges': 'Fit.com',
+    'Maria Eduarda': 'Fit.com',
+  },
 };
 
 function assertConfigured() {

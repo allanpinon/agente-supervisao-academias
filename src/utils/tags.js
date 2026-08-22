@@ -41,4 +41,16 @@ function resolveMarcaUnidade(tagsId = []) {
   return { marca, unidade };
 }
 
-module.exports = { resolveMarcaUnidade, extractTagsId };
+// Marca padronizada pelo nome da atendente (ver config.atendenteMarca) —
+// mais confiável que a tag do contato quando a atendente já é conhecida,
+// porque cada atendente atende uma única marca (regra de negócio fixa,
+// confirmada pelo usuário em 22/08/2026). Retorna undefined quando o nome
+// não está no mapa (atendente ainda não atribuída, ou atendente nova/fora
+// do mapeamento) — nesse caso quem chama deve cair no valor resolvido por
+// tag (resolveMarcaUnidade).
+function resolveMarcaPorAtendente(atendente) {
+  if (!atendente) return undefined;
+  return config.atendenteMarca[atendente];
+}
+
+module.exports = { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente };

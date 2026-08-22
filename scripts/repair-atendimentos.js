@@ -50,7 +50,7 @@
 require('dotenv').config();
 const flwchat = require('../src/clients/flwchat');
 const sheets = require('../src/clients/sheets');
-const { resolveMarcaUnidade, extractTagsId } = require('../src/utils/tags');
+const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../src/utils/tags');
 const logger = require('../src/utils/logger');
 
 const args = process.argv.slice(2);
@@ -181,9 +181,17 @@ async function run() {
       // Avaliações primeiro (fonte confirmada pelo usuario); API do GymBot
       // so como complemento (principalmente Contact ID, que Avaliações nao
       // tem, e qualquer outro campo que a avaliacao tambem nao tenha).
+      // Marca padronizada pela atendente (config.atendenteMarca) e a fonte
+      // preferida quando o nome ja e conhecido em algum dos lugares (linha
+      // atual, avaliacao correspondente ou API) — mais confiavel que a tag
+      // do contato (ver comentario equivalente em
+      // src/pipeline/processSession.js). So preenche campo vazio, nunca
+      // sobrescreve (mesma regra de sempre deste script).
+      const atendenteConhecido = atual.Atendente || avaliacao?.Atendente || atendenteApi;
+      const marcaPadronizada = resolveMarcaPorAtendente(atendenteConhecido);
       const atualizado = {
         ...atual,
-        Marca: atual.Marca || avaliacao?.Marca || marcaApi || '',
+        Marca: atual.Marca || marcaPadronizada || avaliacao?.Marca || marcaApi || '',
         Unidade: atual.Unidade || avaliacao?.Unidade || unidadeApi || '',
         Atendente: atual.Atendente || avaliacao?.Atendente || atendenteApi || '',
         Lead: atual.Lead || avaliacao?.Lead || contactDetails?.name || '',

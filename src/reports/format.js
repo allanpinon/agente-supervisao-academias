@@ -34,6 +34,15 @@ function formatReport({ marca, tipoLabel, dataLabel, data, sinteses }) {
     ? `${data.tempoMedioConversaoDias.toFixed(1)} dias`
     : 'sem conversões no período';
 
+  // Status real dos atendimentos no momento em que o relatório fecha —
+  // pedido explícito do usuário (22/08/2026). "Concluídos" agrega
+  // Atendido/Fechado/Não convertido (a conversa já terminou); "Em
+  // andamento" é o único status que significa que a conversa ainda está
+  // rolando — ver src/reports/compute.js.
+  const statusTexto = data.statusAtendimentos
+    ? `${data.statusAtendimentos.concluidos} concluído(s) | ${data.statusAtendimentos.emAndamento} em andamento`
+    : '—';
+
   const blocosQualitativos = sinteses
     .map(({
       atendente, convertidos, naoConvertidos, emAberto, metricas,
@@ -91,7 +100,8 @@ function formatReport({ marca, tipoLabel, dataLabel, data, sinteses }) {
     `Canal: ${canalTexto || '—'}\n\n` +
     `Por unidade:\n${linhasUnidade || '—'}\n\n` +
     `Por atendente:\n${linhasAtendenteQuant || '—'}\n\n` +
-    `Conversão geral: ${pct(data.conversaoGeralPercent)} | Tempo médio até conversão: ${tempoConversaoTexto}\n\n` +
+    `Conversão geral: ${pct(data.conversaoGeralPercent)} | Tempo médio até conversão: ${tempoConversaoTexto}\n` +
+    `Status dos atendimentos: ${statusTexto}\n\n` +
     `*QUALITATIVO*\n${blocosQualitativos || '—'}`
   );
 }

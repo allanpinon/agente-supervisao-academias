@@ -9,7 +9,7 @@
 // usuario para evitar duplicidade/complexidade com a tag de matriculado.
 const flwchat = require('../clients/flwchat');
 const sheets = require('../clients/sheets');
-const { resolveMarcaUnidade, extractTagsId } = require('../utils/tags');
+const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../utils/tags');
 const { nowLocal } = require('../utils/dates');
 const { evaluateAndRecordSession } = require('./evaluate');
 const logger = require('../utils/logger');
@@ -35,7 +35,13 @@ async function processSessionNew(session) {
   // boa parte dos eventos reais) — ver flwchat.ensureContactDetails.
   const contactDetails = await flwchat.ensureContactDetails(session, logger);
   const atendente = await flwchat.resolveAgentName(session, logger);
-  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
+  const { marca: marcaTag, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
+  // Marca padronizada pela atendente quando ja conhecida (mais confiavel
+  // que a tag — ver config.atendenteMarca); atendente muitas vezes so e
+  // atribuida depois do SESSION_NEW, entao aqui ainda pode cair na tag
+  // mesmo — processSessionComplete corrige quando a atendente ja estiver
+  // definida.
+  const marca = resolveMarcaPorAtendente(atendente) || marcaTag;
 
   // Novo x Recorrente: o GymBot reaproveita o mesmo Contact ID pro mesmo
   // numero de WhatsApp mesmo que a pessoa reapareca meses depois (via um
@@ -98,11 +104,20 @@ async function processSessionComplete(session) {
   // — mesmo a avaliacao (Avaliações) saindo correta, porque evaluateAndRecordSession
   // usa esse mesmo dado fresco pra gravar a propria linha dela. So preenche
   // campo que ainda estiver vazio; nunca sobrescreve valor ja gravado.
-  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(fullSession.contactDetails));
+  const { marca: marcaTag, unidade } = resolveMarcaUnidade(extractTagsId(fullSession.contactDetails));
+  // Padronizacao pela atendente (config.atendenteMarca) tem prioridade
+  // sobre o que ja estiver gravado — diferente dos outros campos deste
+  // UPDATE (que so preenchem se estiver vazio), porque a atendente
+  // costuma so ficar definida DEPOIS do SESSION_NEW, exatamente quando
+  // este UPDATE roda — e porque a tag do contato provou ser a fonte menos
+  // confiavel (grafia inconsistente, tag atrasada) na analise do gap de
+  // 20/08/2026.
+  const marcaPadronizada = resolveMarcaPorAtendente(atendenteResolvido);
+  const marca = marcaPadronizada || marcaTag;
   await sheets.updateRow('atendimentos', existing._rowNumber, {
     ...existing,
     'Status (Atendido/Fechado)': 'Atendido',
-    Marca: existing.Marca || marca || '',
+    Marca: marcaPadronizada || existing.Marca || marca || '',
     Unidade: existing.Unidade || unidade || '',
     Atendente: existing.Atendente || atendenteResolvido || '',
     Lead: existing.Lead || fullSession.contactDetails?.name || '',

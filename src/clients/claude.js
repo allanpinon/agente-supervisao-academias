@@ -89,15 +89,18 @@ const SEGMENT_TOOL = {
   input_schema: {
     type: 'object',
     properties: {
-      resumo: { type: 'string', description: 'Resumo curto (1-2 frases) do padrao observado neste grupo' },
+      resumo: {
+        type: 'string',
+        description: 'Resumo objetivo (1 frase curta) do padrao observado neste grupo, alinhado aos percentuais fornecidos — sem repetir os numeros por extenso.',
+      },
       padroes: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Padroes de comportamento especificos identificados nesses atendimentos',
+        description: 'No maximo 3 padroes de comportamento especificos, cada um como frase curta (ate ~8 palavras) — nao paragrafos.',
       },
       recomendacao: {
         type: 'string',
-        description: 'Uma recomendacao pratica: reforcar (se convertido), corrigir (se nao convertido), ou ajustar (se em aberto)',
+        description: 'No maximo 2-3 acoes praticas e diretas, com foco em melhoria: reforcar (se convertido), corrigir (se nao convertido), ou ajustar (se em aberto). Frases curtas, sem paragrafo longo.',
       },
     },
     required: ['resumo', 'padroes', 'recomendacao'],
@@ -111,12 +114,27 @@ const SEGMENT_TOOL = {
 // `manualContext` (opcional) e o Manual de Boas Praticas atual da marca —
 // quando presente, pedimos pra Claude confirmar/contrastar os padroes da
 // semana/mes com o que ja esta consolidado.
-async function synthesizeSegment(atendente, periodo, resultado, avaliacoes, manualContext) {
+async function synthesizeSegment(atendente, periodo, resultado, avaliacoes, manualContext, metricas) {
   const resumoAvaliacoes = avaliacoes
     .map((a, i) => `Atendimento ${i + 1}: nota geral ${a['Nota Geral (1-5)']}, ` +
       `objecoes: ${a['Objeções Identificadas']}, ` +
       `pontos fortes: ${a['Pontos Fortes']}, pontos fracos: ${a['Pontos Fracos']}`)
     .join('\n');
+
+  // Percentuais OBJETIVOS ja calculados direto das notas 1-5 (ver
+  // computeMetricas em src/reports/compute.js) — passados como contexto
+  // pra Claude ALINHAR a narrativa com o numero real, nunca pra ela
+  // recalcular ou estimar um percentual novo (exigencia do usuario: nao
+  // criar informacao inveridica no relatorio).
+  const metricasTexto = metricas
+    ? `\n\nPercentuais objetivos ja calculados para este grupo (nota >= ${4} = dentro do padrao de ` +
+      `excelencia) — USE esses numeros como referencia no seu resumo/recomendacao, NAO calcule nem ` +
+      `invente percentuais diferentes:\n` +
+      `Nota geral media: ${metricas.mediaGeral !== null ? metricas.mediaGeral.toFixed(1) : '—'} (${metricas.n} atendimento(s))\n` +
+      metricas.dimensoes
+        .map((d) => `${d.label}: ${d.percentOk !== null ? `${d.percentOk.toFixed(0)}%` : '—'} dentro do padrao (media ${d.media !== null ? d.media.toFixed(1) : '—'})`)
+        .join('\n')
+    : '';
 
   let foco;
   if (resultado === 'convertido') {
@@ -149,13 +167,17 @@ async function synthesizeSegment(atendente, periodo, resultado, avaliacoes, manu
     () => client().messages.create({
       model: config.anthropic.model,
       max_tokens: 1024,
-      system: `${EXCELLENCE_STANDARD}${contextoManual}\n\n${foco}\nSeja especifico e pratico. Sempre chame a ferramenta "registrar_analise_segmento".`,
+      system: `${EXCELLENCE_STANDARD}${contextoManual}\n\n${foco}\nSeja objetivo, especifico e CONCISO — nada de ` +
+        'paragrafos longos. "padroes": no maximo 3 itens, frases curtas (ate ~8 palavras cada). ' +
+        '"recomendacao": no maximo 2-3 acoes praticas de melhoria, frases curtas e diretas. Baseie-se nos ' +
+        'percentuais objetivos fornecidos (quando houver) — nao invente nem recalcule numeros. Sempre chame ' +
+        'a ferramenta "registrar_analise_segmento".',
       tools: [SEGMENT_TOOL],
       tool_choice: { type: 'tool', name: 'registrar_analise_segmento' },
       messages: [
         {
           role: 'user',
-          content: `Atendente: ${atendente}\nPeriodo: ${periodo}\nGrupo: ${resultado}\n\nAvaliacoes individuais do grupo:\n${resumoAvaliacoes || '(nenhum atendimento neste grupo)'}`,
+          content: `Atendente: ${atendente}\nPeriodo: ${periodo}\nGrupo: ${resultado}\n\nAvaliacoes individuais do grupo:\n${resumoAvaliacoes || '(nenhum atendimento neste grupo)'}${metricasTexto}`,
         },
       ],
     }),

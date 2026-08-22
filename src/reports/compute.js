@@ -26,6 +26,52 @@ function uniqueBy(list, key) {
   return out;
 }
 
+// Dimensoes da rubrica de excelencia (ver src/rubric.js), na mesma ordem
+// em que sao gravadas em Avaliações (ver src/pipeline/evaluate.js).
+const DIMENSOES = [
+  { campo: 'Nota Cordialidade', label: 'Cordialidade' },
+  { campo: 'Nota Personalização', label: 'Personalização' },
+  { campo: 'Nota Clareza da Oferta', label: 'Clareza da Oferta' },
+  { campo: 'Nota Tratamento Objeções', label: 'Tratamento de Objeções' },
+  { campo: 'Nota Fechamento/CTA', label: 'Fechamento/CTA' },
+  { campo: 'Nota Follow-up', label: 'Follow-up' },
+];
+
+// Nota >= 4 (de 1 a 5) e considerado "dentro do padrao de excelencia".
+const NOTA_MINIMA_OK = 4;
+
+function media(nums) {
+  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+}
+
+// Metricas OBJETIVAS de um grupo de avaliacoes (convertidos, nao
+// convertidos ou em aberto), calculadas direto das notas 1-5 ja gravadas
+// em cada linha de Avaliações — nunca estimadas/narradas pela Claude.
+// Pedido explicito do usuario (22/08/2026): "o qualitativo precisa ser
+// mais objetivo, com levantamento em percentuais" — e a mesma preocupacao
+// de nao criar informacao inveridica ja levantada antes sobre o relatorio.
+// Este calculo e passado (a) pra Claude, como contexto pra alinhar a
+// narrativa da sintese com o numero real (sem inventar um novo), e (b)
+// direto pro texto final do relatorio (src/reports/format.js), que
+// imprime esses percentuais sem depender do texto gerado por Claude.
+function computeMetricas(avaliacoesGrupo) {
+  if (!avaliacoesGrupo.length) return null;
+  const n = avaliacoesGrupo.length;
+  const notasGerais = avaliacoesGrupo
+    .map((a) => Number(a['Nota Geral (1-5)']))
+    .filter(Number.isFinite);
+  const dimensoes = DIMENSOES.map(({ campo, label }) => {
+    const notas = avaliacoesGrupo.map((a) => Number(a[campo])).filter(Number.isFinite);
+    const percentOk = notas.length
+      ? (notas.filter((v) => v >= NOTA_MINIMA_OK).length / notas.length) * 100
+      : null;
+    return {
+      campo, label, media: media(notas), percentOk, n: notas.length,
+    };
+  });
+  return { n, mediaGeral: media(notasGerais), dimensoes };
+}
+
 async function computeReportData(marca, { start, end }) {
   const [leads, atendimentos, conversoes, avaliacoes] = await Promise.all([
     sheets.readAll('leads'),
@@ -123,6 +169,13 @@ async function computeReportData(marca, { start, end }) {
       avaliacoesConvertidas,
       avaliacoesNaoConvertidas,
       avaliacoesEmAberto,
+      // Percentuais objetivos por dimensao da rubrica, um grupo para cada
+      // segmento (null quando o grupo esta vazio) — ver computeMetricas.
+      metricas: {
+        convertidos: computeMetricas(avaliacoesConvertidas),
+        naoConvertidos: computeMetricas(avaliacoesNaoConvertidas),
+        emAberto: computeMetricas(avaliacoesEmAberto),
+      },
     };
   });
 

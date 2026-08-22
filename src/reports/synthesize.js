@@ -15,12 +15,17 @@ const claude = require('../clients/claude');
 async function synthesizeAttendants(porAtendente, periodoLabel, manualContext) {
   const resultados = [];
   for (const entry of porAtendente) {
-    const item = { atendente: entry.atendente };
+    // Percentuais objetivos ja calculados (src/reports/compute.js) — cada
+    // segmento leva o seu para o prompt da Claude (contexto, nao para ela
+    // recalcular) e para o texto final do relatorio (impresso direto,
+    // sem depender do texto gerado — pedido explicito do usuario).
+    const item = { atendente: entry.atendente, metricas: entry.metricas };
 
     if (entry.avaliacoesConvertidas.length) {
       // eslint-disable-next-line no-await-in-loop
       item.convertidos = await claude.synthesizeSegment(
-        entry.atendente, periodoLabel, 'convertido', entry.avaliacoesConvertidas, manualContext
+        entry.atendente, periodoLabel, 'convertido', entry.avaliacoesConvertidas,
+        manualContext, entry.metricas.convertidos
       );
     } else {
       item.convertidos = null;
@@ -29,7 +34,8 @@ async function synthesizeAttendants(porAtendente, periodoLabel, manualContext) {
     if (entry.avaliacoesNaoConvertidas.length) {
       // eslint-disable-next-line no-await-in-loop
       item.naoConvertidos = await claude.synthesizeSegment(
-        entry.atendente, periodoLabel, 'nao_convertido', entry.avaliacoesNaoConvertidas, manualContext
+        entry.atendente, periodoLabel, 'nao_convertido', entry.avaliacoesNaoConvertidas,
+        manualContext, entry.metricas.naoConvertidos
       );
     } else {
       item.naoConvertidos = null;
@@ -42,7 +48,8 @@ async function synthesizeAttendants(porAtendente, periodoLabel, manualContext) {
     if (entry.avaliacoesEmAberto.length) {
       // eslint-disable-next-line no-await-in-loop
       item.emAberto = await claude.synthesizeSegment(
-        entry.atendente, periodoLabel, 'em_aberto', entry.avaliacoesEmAberto, manualContext
+        entry.atendente, periodoLabel, 'em_aberto', entry.avaliacoesEmAberto,
+        manualContext, entry.metricas.emAberto
       );
     } else {
       item.emAberto = null;

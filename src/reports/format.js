@@ -4,6 +4,19 @@ function pct(n) {
   return `${n.toFixed(1)}%`;
 }
 
+// Linha de percentuais objetivos por dimensao da rubrica — calculada em
+// src/reports/compute.js direto das notas 1-5 gravadas, nunca narrada por
+// Claude (pedido explicito do usuario: qualitativo objetivo, com
+// percentuais reais, sem risco de numero inventado no texto gerado).
+function formatMetricas(m) {
+  if (!m) return null;
+  const linhas = m.dimensoes
+    .map((d) => `${d.label} ${d.percentOk !== null ? `${d.percentOk.toFixed(0)}%` : '—'}`)
+    .join(' | ');
+  const mediaGeral = m.mediaGeral !== null ? m.mediaGeral.toFixed(1) : '—';
+  return `📊 ${linhas} (nota média ${mediaGeral}, n=${m.n})`;
+}
+
 function formatReport({ marca, tipoLabel, dataLabel, data, sinteses }) {
   const linhasUnidade = data.porUnidade
     .map((u) => `• ${u.unidade}: ${u.leads} leads, ${u.atendidos} atendidos, ${u.fechados} fechados (${pct(u.conversaoPercent)})`)
@@ -23,23 +36,27 @@ function formatReport({ marca, tipoLabel, dataLabel, data, sinteses }) {
 
   const blocosQualitativos = sinteses
     .map(({
-      atendente, convertidos, naoConvertidos, emAberto,
+      atendente, convertidos, naoConvertidos, emAberto, metricas,
     }) => {
       const partes = [`*${atendente}*`];
 
       if (convertidos) {
-        const padroes = convertidos.padroes?.length ? convertidos.padroes.join(', ') : '—';
+        const padroes = convertidos.padroes?.length ? convertidos.padroes.join(' • ') : '—';
+        const metricasLinha = formatMetricas(metricas?.convertidos);
         partes.push(
-          `✅ O que funcionou (atendimentos convertidos): ${convertidos.resumo}\n` +
+          `✅ O que funcionou (atendimentos convertidos)${metricasLinha ? `\n${metricasLinha}` : ''}\n` +
+          `${convertidos.resumo}\n` +
           `Padrões: ${padroes}\n` +
           `Reforçar: ${convertidos.recomendacao}`
         );
       }
 
       if (naoConvertidos) {
-        const padroes = naoConvertidos.padroes?.length ? naoConvertidos.padroes.join(', ') : '—';
+        const padroes = naoConvertidos.padroes?.length ? naoConvertidos.padroes.join(' • ') : '—';
+        const metricasLinha = formatMetricas(metricas?.naoConvertidos);
         partes.push(
-          `⚠️ O que travou (atendimentos não convertidos): ${naoConvertidos.resumo}\n` +
+          `⚠️ O que travou (atendimentos não convertidos)${metricasLinha ? `\n${metricasLinha}` : ''}\n` +
+          `${naoConvertidos.resumo}\n` +
           `Padrões: ${padroes}\n` +
           `Corrigir: ${naoConvertidos.recomendacao}`
         );
@@ -49,9 +66,11 @@ function formatReport({ marca, tipoLabel, dataLabel, data, sinteses }) {
       // diario. Sem isso, o relatorio diario quase sempre ficava sem
       // nenhuma leitura qualitativa (ver src/reports/compute.js).
       if (emAberto) {
-        const padroes = emAberto.padroes?.length ? emAberto.padroes.join(', ') : '—';
+        const padroes = emAberto.padroes?.length ? emAberto.padroes.join(' • ') : '—';
+        const metricasLinha = formatMetricas(metricas?.emAberto);
         partes.push(
-          `🔎 Atendimentos em aberto (ainda sem resultado): ${emAberto.resumo}\n` +
+          `🔎 Atendimentos em aberto (ainda sem resultado)${metricasLinha ? `\n${metricasLinha}` : ''}\n` +
+          `${emAberto.resumo}\n` +
           `Padrões: ${padroes}\n` +
           `Ajustar: ${emAberto.recomendacao}`
         );

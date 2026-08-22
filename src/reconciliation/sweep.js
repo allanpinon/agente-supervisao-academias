@@ -17,7 +17,7 @@
 const flwchat = require('../clients/flwchat');
 const sheets = require('../clients/sheets');
 const { config } = require('../config');
-const { resolveMarcaUnidade } = require('../utils/tags');
+const { resolveMarcaUnidade, extractTagsId } = require('../utils/tags');
 const { nowLocal, diffInDays } = require('../utils/dates');
 const logger = require('../utils/logger');
 
@@ -82,7 +82,7 @@ async function runReconciliationSweep() {
       // valor ja gravado em Atendimentos, caso nem o reforco encontre nada.
       const contactDetails = await flwchat.ensureContactDetails(session, logger);
       const atendente = await flwchat.resolveAgentName(session, logger);
-      const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
+      const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
       const dataClassificacao = session.updatedAt || nowLocal().toISO();
       // Origem do calculo de "Dias ate Conversao": data do PRIMEIRO
       // atendimento deste lead (nao a data de criacao do contato no

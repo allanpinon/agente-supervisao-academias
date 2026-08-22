@@ -15,7 +15,7 @@
 require('dotenv').config();
 const flwchat = require('../src/clients/flwchat');
 const sheets = require('../src/clients/sheets');
-const { resolveMarcaUnidade } = require('../src/utils/tags');
+const { resolveMarcaUnidade, extractTagsId } = require('../src/utils/tags');
 const { evaluateAndRecordSession } = require('../src/pipeline/evaluate');
 const { nowLocal, diffInDays } = require('../src/utils/dates');
 const { config } = require('../src/config');
@@ -44,7 +44,7 @@ function parseItemDate(item) {
 async function importarLead(session, leadsIndex) {
   const contact = session.contactDetails;
   if (!contact?.id || leadsIndex.has(contact.id)) return;
-  const { marca, unidade } = resolveMarcaUnidade(contact.tagsId || []);
+  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contact));
   const row = {
     'Data/Hora': contact.createdAt || session.createdAt || '',
     Marca: marca || '',
@@ -84,7 +84,7 @@ function primeiroAtendimentoDoContato(contactId, atendimentosIndex) {
 async function importarAtendimento(session, atendimentosIndex) {
   const existente = atendimentosIndex.get(session.id);
   if (existente) return existente;
-  const { marca, unidade } = resolveMarcaUnidade(session.contactDetails?.tagsId || []);
+  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(session.contactDetails));
 
   // Novo x Recorrente — mesma logica de processSessionNew (tempo real),
   // mas com uma ressalva importante aqui: a importacao pagina do mais novo
@@ -130,7 +130,7 @@ async function importarConversao(session, avaliacoesIndex, conversoesIndex, aten
   if (category !== config.classificationSuccessCategory) return;
   if (conversoesIndex.has(session.id)) return;
 
-  const { marca, unidade } = resolveMarcaUnidade(session.contactDetails?.tagsId || []);
+  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(session.contactDetails));
   const dataClassificacao = session.updatedAt || session.createdAt || nowLocal().toISO();
   // Origem do calculo de "Dias ate Conversao": data do PRIMEIRO atendimento
   // deste lead (nao a data de criacao do contato no GymBot, e nao

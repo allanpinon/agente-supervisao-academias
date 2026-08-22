@@ -2,7 +2,7 @@
 // Ambos atualizam a aba "Leads" — CONTACT_NEW cria a linha, CONTACT_TAG_UPDATE
 // atualiza marca/unidade/atendente se a tag mudou depois da criacao.
 const sheets = require('../clients/sheets');
-const { resolveMarcaUnidade } = require('../utils/tags');
+const { resolveMarcaUnidade, extractTagsId } = require('../utils/tags');
 const { nowLocal } = require('../utils/dates');
 const logger = require('../utils/logger');
 
@@ -24,7 +24,7 @@ async function processContactNew(contact) {
     return;
   }
 
-  const { marca, unidade } = resolveMarcaUnidade(contact.tagsId || []);
+  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contact));
   const row = {
     'Data/Hora': nowLocal().toISO(),
     Marca: marca || '',
@@ -42,7 +42,7 @@ async function processContactNew(contact) {
 
 async function processContactTagUpdate(contact) {
   const existing = await sheets.findRowByColumn('leads', 'Contact ID (GymBot)', contact.id);
-  const { marca, unidade } = resolveMarcaUnidade(contact.tagsId || []);
+  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contact));
 
   if (!existing) {
     // Nao vimos o CONTACT_NEW (pode ter acontecido antes do webhook estar

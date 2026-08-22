@@ -52,9 +52,11 @@ async function run() {
   const atendente = await flwchat.resolveAgentName(session, logger);
   console.log(`\nresolveAgentName -> "${atendente}"\n`);
 
-  const { resolveMarcaUnidade } = require('../src/utils/tags');
-  const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
-  console.log(`resolveMarcaUnidade(contactDetails.tagsId=${JSON.stringify(contactDetails?.tagsId)}) -> marca="${marca}", unidade="${unidade}"\n`);
+  const { resolveMarcaUnidade, extractTagsId } = require('../src/utils/tags');
+  const tags = extractTagsId(contactDetails);
+  const { marca, unidade } = resolveMarcaUnidade(tags);
+  console.log(`extractTagsId(contactDetails) -> ${JSON.stringify(tags)}`);
+  console.log(`resolveMarcaUnidade(...) -> marca="${marca}", unidade="${unidade}"\n`);
 
   process.exit(0);
 }

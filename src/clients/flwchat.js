@@ -9,6 +9,7 @@
 const axios = require('axios');
 const { config } = require('../config');
 const { withRetry } = require('../utils/retry');
+const { extractTagsId } = require('../utils/tags');
 
 function client(prefix) {
   return axios.create({
@@ -126,8 +127,14 @@ function extractContactId(session) {
 // quando as TAGS (tagsId) ja estao presentes — nome sozinho, sem tags, nao
 // e mais suficiente, entao a busca real do contato acontece sempre que as
 // tags ainda nao vieram, mesmo que o nome ja esteja disponivel.
+// BUG REAL ADICIONAL ENCONTRADO E CORRIGIDO (22/08/2026): mesmo depois da
+// correcao acima (so tratar como "usavel" quando ha tags), a checagem
+// continuava sempre falhando pra contato vindo da API REST — porque
+// `GET /core/v1/contact/{id}` devolve a lista de tags no campo `tagIds`
+// (sem "s"), nao `tagsId` (com "s", usado pelo payload do webhook). Ver
+// extractTagsId em src/utils/tags.js para o relato completo.
 function hasUsableContactDetails(contactDetails) {
-  return Boolean(contactDetails && contactDetails.tagsId && contactDetails.tagsId.length);
+  return Boolean(contactDetails && extractTagsId(contactDetails).length);
 }
 
 async function ensureContactDetails(session, logger) {

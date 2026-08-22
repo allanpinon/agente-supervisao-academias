@@ -50,7 +50,7 @@
 require('dotenv').config();
 const flwchat = require('../src/clients/flwchat');
 const sheets = require('../src/clients/sheets');
-const { resolveMarcaUnidade } = require('../src/utils/tags');
+const { resolveMarcaUnidade, extractTagsId } = require('../src/utils/tags');
 const logger = require('../src/utils/logger');
 
 const args = process.argv.slice(2);
@@ -153,7 +153,7 @@ async function run() {
         contactDetails = await flwchat.ensureContactDetails(session, logger);
         // eslint-disable-next-line no-await-in-loop
         atendenteApi = await flwchat.resolveAgentName(session, logger);
-        const resolvido = resolveMarcaUnidade(contactDetails?.tagsId || []);
+        const resolvido = resolveMarcaUnidade(extractTagsId(contactDetails));
         marcaApi = resolvido.marca;
         unidadeApi = resolvido.unidade;
       }

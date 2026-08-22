@@ -9,7 +9,7 @@
 // usuario para evitar duplicidade/complexidade com a tag de matriculado.
 const flwchat = require('../clients/flwchat');
 const sheets = require('../clients/sheets');
-const { resolveMarcaUnidade } = require('../utils/tags');
+const { resolveMarcaUnidade, extractTagsId } = require('../utils/tags');
 const { nowLocal } = require('../utils/dates');
 const { evaluateAndRecordSession } = require('./evaluate');
 const logger = require('../utils/logger');
@@ -35,7 +35,7 @@ async function processSessionNew(session) {
   // boa parte dos eventos reais) — ver flwchat.ensureContactDetails.
   const contactDetails = await flwchat.ensureContactDetails(session, logger);
   const atendente = await flwchat.resolveAgentName(session, logger);
-  const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
+  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
 
   // Novo x Recorrente: o GymBot reaproveita o mesmo Contact ID pro mesmo
   // numero de WhatsApp mesmo que a pessoa reapareca meses depois (via um
@@ -98,7 +98,7 @@ async function processSessionComplete(session) {
   // — mesmo a avaliacao (Avaliações) saindo correta, porque evaluateAndRecordSession
   // usa esse mesmo dado fresco pra gravar a propria linha dela. So preenche
   // campo que ainda estiver vazio; nunca sobrescreve valor ja gravado.
-  const { marca, unidade } = resolveMarcaUnidade(fullSession.contactDetails?.tagsId || []);
+  const { marca, unidade } = resolveMarcaUnidade(extractTagsId(fullSession.contactDetails));
   await sheets.updateRow('atendimentos', existing._rowNumber, {
     ...existing,
     'Status (Atendido/Fechado)': 'Atendido',

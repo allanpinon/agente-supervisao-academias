@@ -39,6 +39,23 @@ async function run() {
   console.log(`  session.userId (flat): ${session?.userId}`);
   console.log(`  session.agentId (flat): ${session?.agentId}`);
 
+  // Chama EXATAMENTE o mesmo caminho que scripts/repair-atendimentos.js e
+  // o pipeline em tempo real usam — pra ver, com certeza, se e aqui que a
+  // resolucao esta falhando (em vez de so olhar o payload cru da sessao).
+  logger.info('[inspect-by-id] Chamando ensureContactDetails(session)...');
+  const contactDetails = await flwchat.ensureContactDetails(session, logger);
+  console.log('\n========== RESULTADO DE ensureContactDetails ==========');
+  console.log(JSON.stringify(contactDetails, null, 2));
+  console.log('========== FIM ==========\n');
+
+  logger.info('[inspect-by-id] Chamando resolveAgentName(session)...');
+  const atendente = await flwchat.resolveAgentName(session, logger);
+  console.log(`\nresolveAgentName -> "${atendente}"\n`);
+
+  const { resolveMarcaUnidade } = require('../src/utils/tags');
+  const { marca, unidade } = resolveMarcaUnidade(contactDetails?.tagsId || []);
+  console.log(`resolveMarcaUnidade(contactDetails.tagsId=${JSON.stringify(contactDetails?.tagsId)}) -> marca="${marca}", unidade="${unidade}"\n`);
+
   process.exit(0);
 }
 

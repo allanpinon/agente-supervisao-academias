@@ -6,12 +6,31 @@ const { processSessionNew, processSessionComplete } = require('../pipeline/proce
 const { processPaymentNew } = require('../pipeline/processPayment');
 const logger = require('../utils/logger');
 
+// DIAGNOSTICO EM ANDAMENTO (26/08/2026): investigando por que nenhuma
+// conversao esta sendo gravada, mesmo com negocios reais marcados "Ganho"
+// no GymBot (ex: sessao b0d42dd2-7e4f-47a5-877f-87a7b664a83d, William
+// Quaresma). Confirmado com a API real que `session.classification` vem
+// SEMPRE `null` em GET /v2/session/{id} — a comparacao que
+// src/reconciliation/sweep.js faz contra CLASSIFICATION_SUCCESS_CATEGORY
+// nunca pode bater, entao nenhuma conversao jamais foi gravada por esse
+// caminho. O "Ganho" que aparece na interface do GymBot provavelmente vem
+// de um recurso separado (painel/funil de vendas — ver o evento de
+// webhook PANEL_CARD_STEP_CHANGE, que existe no catalogo da API mas nunca
+// foi assinado nem tem handler). Este handler NAO faz nada com o evento
+// ainda — so loga o payload cru, pra confirmarmos o formato real assim
+// que um cartao mudar de etapa, ANTES de escrever qualquer logica em cima
+// de um formato assumido (mesmo cuidado de sempre: nao inventar dado).
+function logPanelCardStepChange(content) {
+  logger.info(`[webhook] PANEL_CARD_STEP_CHANGE recebido (diagnostico, nao processado ainda): ${JSON.stringify(content)}`);
+}
+
 const HANDLERS = {
   CONTACT_NEW: (content) => processContactNew(content),
   CONTACT_TAG_UPDATE: (content) => processContactTagUpdate(content),
   SESSION_NEW: (content) => processSessionNew(content),
   SESSION_COMPLETE: (content) => processSessionComplete(content),
   PAYMENT_NEW: (content) => processPaymentNew(content),
+  PANEL_CARD_STEP_CHANGE: (content) => logPanelCardStepChange(content),
 };
 
 async function webhookHandler(req, res) {

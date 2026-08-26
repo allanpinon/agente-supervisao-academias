@@ -79,16 +79,13 @@ const config = {
   // "Objetivo perdido" / "Lead mora longe", chegou no webhook com
   // classification.category = "LOST".
   //
-  // WON: AINDA NAO CONFIRMADO. Nao adivinhamos esse valor (o motivo de
-  // todo este bug foi justamente confiar em um valor nao confirmado) —
-  // fica vazio ate um teste real de "Objetivo atingido" (Ganho). Quando
-  // esse teste acontecer, o log do servico vai mostrar uma linha
-  // "[conversion] ... categoria nao mapeada" com o valor exato recebido;
-  // basta definir CLASSIFICATION_CATEGORY_WON com esse valor nas
-  // variaveis de ambiente (Railway) — nao precisa nem de novo deploy.
+  // WON: confirmado com dado real em 26/08/2026 — sessao
+  // 6d7f3599-1c8b-47eb-9f86-9e493f56e6c9, classificada no GymBot como
+  // "Objetivo atingido" / "Renovação pelo link", chegou no webhook com
+  // classification.category = "WON" (categoryName: "Ganho").
   classificationCategories: {
     LOST: process.env.CLASSIFICATION_CATEGORY_LOST || 'LOST',
-    WON: process.env.CLASSIFICATION_CATEGORY_WON || '',
+    WON: process.env.CLASSIFICATION_CATEGORY_WON || 'WON',
   },
 
   // Mapeamento de tags do GymBot -> marca / unidade.

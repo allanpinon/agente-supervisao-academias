@@ -177,10 +177,15 @@ async function importarConversao(session, avaliacoesIndex, conversoesIndex, aten
     Unidade: unidade || '',
     Atendente: session.agentDetails?.name || '',
     Lead: session.contactDetails?.name || '',
+    // So chega aqui quando category === WON (checagem acima) — sempre
+    // 'Convertido'. Ver src/pipeline/conversion.js pro caso 'Nao
+    // convertido' (esta funcao so trata a fracao que converteu, por design
+    // — nome da funcao).
+    Resultado: 'Convertido',
     Valor: session.classification?.amount ?? '',
     'Session ID (GymBot)': session.id,
     Motivo: session.classification?.categoryDescription?.trim() || session.classification?.categoryName || category,
-    'Dias até Conversão': dataOrigemLead
+    'Dias até Classificação': dataOrigemLead
       ? Math.max(0, Math.round(diffInDays(dataOrigemLead, dataClassificacao)))
       : '',
     'Contact ID (GymBot)': session.contactDetails?.id || '',

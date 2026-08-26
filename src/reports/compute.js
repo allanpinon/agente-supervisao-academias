@@ -132,6 +132,15 @@ async function computeReportData(marca, { start, end }) {
   const conversoesMarca = conversoes.filter(
     (c) => normalize(marcaEfetiva(c)) === marcaAlvo && inRange(c['Data/Hora'], start, end)
   );
+  // ATUALIZADO (26/08/2026): a planilha "Conversões" passou a guardar TODO
+  // atendimento classificado no GymBot, nao so os convertidos (a pedido do
+  // usuario, para dar pra avaliar leads perdidos tambem) — ver
+  // src/pipeline/conversion.js. Por isso, daqui pra frente, "fechados"/taxa
+  // de conversao no relatorio SEMPRE precisa filtrar por
+  // Resultado === 'Convertido' explicitamente; usar conversoesMarca (a
+  // planilha inteira) direto nesses calculos agora contaria leads perdidos
+  // como se tivessem convertido.
+  const conversoesGanhasMarca = conversoesMarca.filter((c) => c.Resultado === 'Convertido');
   const avaliacoesMarca = avaliacoes.filter(
     (v) => normalize(marcaEfetiva(v)) === marcaAlvo && inRange(v['Data/Hora'], start, end)
   );
@@ -187,7 +196,7 @@ async function computeReportData(marca, { start, end }) {
       'Contact ID (GymBot)'
     );
     const fechadosU = uniqueBy(
-      conversoesMarca.filter((c) => c.Unidade === unidade),
+      conversoesGanhasMarca.filter((c) => c.Unidade === unidade),
       'Contact ID (GymBot)'
     );
     const conversao = leadsU.length ? (fechadosU.length / leadsU.length) * 100 : 0;
@@ -219,7 +228,7 @@ async function computeReportData(marca, { start, end }) {
     'Contact ID (GymBot)'
   );
   const fechadosSemUnidade = uniqueBy(
-    conversoesMarca.filter((c) => !unidadesConhecidas.has(c.Unidade)),
+    conversoesGanhasMarca.filter((c) => !unidadesConhecidas.has(c.Unidade)),
     'Contact ID (GymBot)'
   );
   if (leadsSemUnidade.length || atendidosSemUnidade.length || fechadosSemUnidade.length) {
@@ -243,7 +252,7 @@ async function computeReportData(marca, { start, end }) {
       'Contact ID (GymBot)'
     );
     const fechadosA = uniqueBy(
-      conversoesMarca.filter((c) => c.Atendente === atendente),
+      conversoesGanhasMarca.filter((c) => c.Atendente === atendente),
       'Contact ID (GymBot)'
     );
     const conversao = atendidosA.length ? (fechadosA.length / atendidosA.length) * 100 : 0;
@@ -279,11 +288,11 @@ async function computeReportData(marca, { start, end }) {
     };
   });
 
-  const fechadosGeralUnicos = uniqueBy(conversoesMarca, 'Contact ID (GymBot)').length;
+  const fechadosGeralUnicos = uniqueBy(conversoesGanhasMarca, 'Contact ID (GymBot)').length;
   const conversaoGeral = leadsUnicos.length ? (fechadosGeralUnicos / leadsUnicos.length) * 100 : 0;
 
-  const diasConversao = conversoesMarca
-    .map((c) => Number(c['Dias até Conversão']))
+  const diasConversao = conversoesGanhasMarca
+    .map((c) => Number(c['Dias até Classificação']))
     .filter((n) => Number.isFinite(n));
   const tempoMedioConversao = diasConversao.length
     ? diasConversao.reduce((a, b) => a + b, 0) / diasConversao.length

@@ -36,12 +36,30 @@ const SHEETS = {
       'Classificação do Lead',
     ],
   },
+  // ATUALIZADO (26/08/2026): a pedido do usuario, esta planilha passou a
+  // registrar TODO atendimento classificado no GymBot — nao so os que
+  // converteram. Motivo: precisamos conseguir avaliar leads perdidos e o
+  // motivo especifico de cada perda (nao so contar conversao), gerar dado
+  // pra tomada de decisao, e permitir que o agente aprenda com o processo
+  // completo, nao so com o que deu certo. Por isso a coluna nova
+  // "Resultado" (Convertido / Nao convertido) foi adicionada — sem ela nao
+  // dava pra distinguir as duas coisas nesta planilha. A coluna antiga
+  // "Dias até Conversão" foi renomeada para "Dias até Classificação" pelo
+  // mesmo motivo (agora mede o tempo ate QUALQUER classificacao final, nao
+  // so uma venda).
+  //
+  // ATENCAO: esta planilha estava 100% vazia (so cabecalho) ate esta
+  // mudanca — por isso deu pra reordenar as colunas com seguranca, sem
+  // risco de desalinhar dado real ja gravado. Requer atualizar a LINHA 1
+  // (cabecalho) da aba real no Google Sheets pra bater exatamente com esta
+  // ordem (o codigo escreve por POSICAO da coluna, nao le o cabecalho da
+  // planilha pra conferir nome) — ver instrucoes na doc do projeto.
   conversoes: {
     id: config.google.sheets.conversoes,
     tab: 'Sheet1',
     headers: [
-      'Data/Hora', 'Marca', 'Unidade', 'Atendente', 'Lead', 'Valor',
-      'Session ID (GymBot)', 'Motivo', 'Dias até Conversão', 'Contact ID (GymBot)',
+      'Data/Hora', 'Marca', 'Unidade', 'Atendente', 'Lead', 'Resultado', 'Valor',
+      'Session ID (GymBot)', 'Motivo', 'Dias até Classificação', 'Contact ID (GymBot)',
     ],
   },
   avaliacoes: {

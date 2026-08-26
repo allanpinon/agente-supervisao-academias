@@ -57,6 +57,68 @@ async function marcarResultadoAvaliacao(sessionId, resultado) {
   await sheets.updateRow('avaliacoes', avaliacao._rowNumber, { ...avaliacao, Resultado: resultado });
 }
 
+// Monta a linha de "Conversões" (Data/Hora, Marca, Unidade, Atendente,
+// Lead, Resultado, Valor, Session ID, Motivo, Dias até Classificação,
+// Contact ID) e grava — cria linha nova se a sessao ainda nao tem
+// nenhuma, ou ATUALIZA a linha existente se ja tinha (caso de
+// reclassificacao real: o GymBot permite reabrir e reclassificar uma
+// sessao ja concluida — confirmado com dado real, a mesma sessao
+// 6d7f3599-... foi reclassificada mais de uma vez nesta investigacao). Um
+// simples "pula se ja existe" quebraria esse caso (a linha ficaria com o
+// resultado antigo pra sempre); por isso aqui e find-or-update, igual
+// marcarResultadoAvaliacao ja faz pra Avaliações.
+async function registrarClassificacao(session, atendimentoRow, resultado, category, classification) {
+  const sessionId = session.id;
+  // Reforca contactDetails quando a sessao vem sem esse dado — ver
+  // flwchat.ensureContactDetails. Mantem fallback pro valor ja gravado em
+  // Atendimentos, caso nem o reforco encontre nada.
+  const contactDetails = await flwchat.ensureContactDetails(session, logger);
+  const atendente = await flwchat.resolveAgentName(session, logger);
+  const { marca: marcaTag, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
+  const marcaResolvida = resolveMarcaPorAtendente(atendente) || resolveMarcaPorAtendente(atendimentoRow.Atendente);
+  const marca = marcaResolvida || marcaTag || atendimentoRow.Marca || '';
+  const dataClassificacao = session.updatedAt || nowLocal().toISO();
+  const contactIdAtual = contactDetails?.id || atendimentoRow['Contact ID (GymBot)'];
+
+  // Origem do calculo de "Dias ate Classificacao": data do PRIMEIRO
+  // atendimento deste lead (mede "quanto tempo levou ate um resultado
+  // final", incluindo reativacao) — mesma logica ja usada antes na
+  // varredura de reconciliacao, so que agora se aplica tanto a Ganho
+  // quanto a Perdido.
+  const primeiroAtendimento = await sheets.findEarliestRowByColumn(
+    'atendimentos', 'Contact ID (GymBot)', contactIdAtual, 'Data/Hora'
+  );
+  const dataOrigemLead = primeiroAtendimento?.['Data/Hora'] || atendimentoRow['Data/Hora'];
+
+  const linha = {
+    'Data/Hora': dataClassificacao,
+    Marca: marca,
+    Unidade: unidade || atendimentoRow.Unidade || '',
+    Atendente: atendente || atendimentoRow.Atendente || '',
+    Lead: contactDetails?.name || atendimentoRow.Lead || '',
+    Resultado: resultado,
+    Valor: classification.amount ?? '',
+    'Session ID (GymBot)': sessionId,
+    // Motivo especifico (ex: "Renovação pelo link", "Lead mora longe"),
+    // nao so a categoria generica — mais util pro Manual de Boas Praticas
+    // e pra leitura do time.
+    Motivo: classification.categoryDescription?.trim() || classification.categoryName || category,
+    'Dias até Classificação': dataOrigemLead
+      ? Math.max(0, Math.round(diffInDays(dataOrigemLead, dataClassificacao)))
+      : '',
+    'Contact ID (GymBot)': contactIdAtual || '',
+  };
+
+  const existente = await sheets.findRowByColumn('conversoes', 'Session ID (GymBot)', sessionId);
+  if (existente) {
+    const mudou = Object.keys(linha).some((k) => String(existente[k] ?? '') !== String(linha[k] ?? ''));
+    if (mudou) await sheets.updateRow('conversoes', existente._rowNumber, linha);
+    return { novaLinha: false, atualizada: mudou };
+  }
+  await sheets.appendRow('conversoes', linha);
+  return { novaLinha: true, atualizada: false };
+}
+
 // `session` precisa ter `.classification` (do webhook cru ou, no futuro,
 // de outro caminho que venha a funcionar) e `.id`. `atendimentoRow` e a
 // linha atual de "Atendimentos" (precisa de `_rowNumber`) — usada como
@@ -76,54 +138,16 @@ async function registerConversionOutcome(session, atendimentoRow) {
       'Status (Atendido/Fechado)': 'Não convertido',
     });
     await marcarResultadoAvaliacao(sessionId, 'Não convertido');
+    await registrarClassificacao(session, atendimentoRow, 'Não convertido', category, classification);
     logger.info(
       `[conversion] Sessao ${sessionId} classificada como "${classification.categoryName || category}"` +
-      `${classification.categoryDescription ? ` (${classification.categoryDescription.trim()})` : ''} — marcada Nao convertido.`
+      `${classification.categoryDescription ? ` (${classification.categoryDescription.trim()})` : ''} — marcada Nao convertido e registrada em Conversões.`
     );
     return { outcome: 'perdido', category };
   }
 
   if (config.classificationCategories.WON && category === config.classificationCategories.WON) {
-    const jaExiste = await sheets.findRowByColumn('conversoes', 'Session ID (GymBot)', sessionId);
-    if (!jaExiste) {
-      // Reforca contactDetails quando a sessao vem sem esse dado — ver
-      // flwchat.ensureContactDetails. Mantem fallback pro valor ja
-      // gravado em Atendimentos, caso nem o reforco encontre nada.
-      const contactDetails = await flwchat.ensureContactDetails(session, logger);
-      const atendente = await flwchat.resolveAgentName(session, logger);
-      const { marca: marcaTag, unidade } = resolveMarcaUnidade(extractTagsId(contactDetails));
-      const marcaResolvida = resolveMarcaPorAtendente(atendente) || resolveMarcaPorAtendente(atendimentoRow.Atendente);
-      const marca = marcaResolvida || marcaTag || atendimentoRow.Marca || '';
-      const dataClassificacao = session.updatedAt || nowLocal().toISO();
-      const contactIdAtual = contactDetails?.id || atendimentoRow['Contact ID (GymBot)'];
-
-      // Origem do calculo de "Dias ate Conversao": data do PRIMEIRO
-      // atendimento deste lead (mede "quanto tempo o lead levou pra virar
-      // cliente", incluindo reativacao) — mesma logica ja usada antes na
-      // varredura de reconciliacao.
-      const primeiroAtendimento = await sheets.findEarliestRowByColumn(
-        'atendimentos', 'Contact ID (GymBot)', contactIdAtual, 'Data/Hora'
-      );
-      const dataOrigemLead = primeiroAtendimento?.['Data/Hora'] || atendimentoRow['Data/Hora'];
-
-      await sheets.appendRow('conversoes', {
-        'Data/Hora': dataClassificacao,
-        Marca: marca,
-        Unidade: unidade || atendimentoRow.Unidade || '',
-        Atendente: atendente || atendimentoRow.Atendente || '',
-        Lead: contactDetails?.name || atendimentoRow.Lead || '',
-        Valor: classification.amount ?? '',
-        'Session ID (GymBot)': sessionId,
-        // Motivo especifico (ex: "Renovação pelo link"), nao so a
-        // categoria generica — mais util pro Manual de Boas Praticas.
-        Motivo: classification.categoryDescription?.trim() || classification.categoryName || category,
-        'Dias até Conversão': dataOrigemLead
-          ? Math.max(0, Math.round(diffInDays(dataOrigemLead, dataClassificacao)))
-          : '',
-        'Contact ID (GymBot)': contactIdAtual || '',
-      });
-    }
-
+    await registrarClassificacao(session, atendimentoRow, 'Convertido', category, classification);
     await sheets.updateRow('atendimentos', atendimentoRow._rowNumber, {
       ...atendimentoRow,
       'Status (Atendido/Fechado)': 'Fechado',
@@ -135,7 +159,10 @@ async function registerConversionOutcome(session, atendimentoRow) {
 
   // Categoria recebida mas nao reconhecida (nem LOST nem o WON
   // configurado) — provavelmente "Objetivo atingido" (ainda nao
-  // confirmado) ou "Duvidas". NAO tratamos como conversao por chute.
+  // confirmado) ou "Duvidas". NAO gravamos em nenhuma planilha por
+  // chute — nem em Conversões, porque nao sabemos se conta como
+  // Convertido, Nao convertido, ou um terceiro resultado (Duvidas) que
+  // ainda nao tem um valor de "Resultado" definido.
   logger.warn(
     `[conversion] Sessao ${sessionId} veio com classification.category = "${category}" ` +
     `(categoryName: "${classification.categoryName || '?'}", categoryDescription: "${classification.categoryDescription || '?'}") ` +

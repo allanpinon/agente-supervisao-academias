@@ -36,10 +36,33 @@ const HANDLERS = {
 async function webhookHandler(req, res) {
   // Responde 200 imediatamente (evita retentativa por timeout do lado do
   // GymBot) e processa o evento depois. Se o processamento falhar, o erro
-  // fica so no log — nao ha reentrega automatica neste MVP.
+  // fica so no log — MAS confirmado com dado real em 26/08/2026 que o
+  // GymBot REENTREGA sozinho pelo menos SESSION_COMPLETE apos uma falha
+  // (uma sessao que deu 403 na 1a tentativa foi processada com sucesso
+  // ~9 minutos depois, sem nenhuma acao nossa) — o comentario antigo
+  // dizendo "nao ha reentrega automatica" estava errado, mantido aqui so
+  // pra registrar a correcao.
   res.status(200).json({ received: true });
 
   const { eventType, content } = req.body || {};
+
+  // DIAGNOSTICO TEMPORARIO (26/08/2026): investigando onde mora o dado de
+  // classificacao (Objetivo atingido/perdido + motivo especifico, ver a
+  // tela "Classificar atendimento" documentada no projeto). Ja confirmado
+  // que GET /v2/session/{id} sempre devolve `classification: null` — mas
+  // processSessionComplete NUNCA olhou pro `content` cru do proprio
+  // webhook, so usa `content.id` pra rebuscar a sessao via GET (que
+  // descarta silenciosamente qualquer coisa que o payload do webhook
+  // tivesse a mais). Testamos assinar PANEL_CARD_STEP_CHANGE (evento
+  // "Painel - Card movido") como hipotese de onde a classificacao mora,
+  // mas nenhum evento de Painel chegou nem uma vez apos uma classificacao
+  // real de teste — entao ou o card do Painel nao e criado/movido por
+  // esse fluxo de classificacao no chat, ou tem algum delay/config que
+  // ainda nao identificamos. Enquanto isso, logando o corpo CRU de TODO
+  // evento recebido (nao so os sem handler) pra comparar com o que GET
+  // devolve — remover este log depois que o campo certo for encontrado.
+  logger.info(`[webhook] RAW ${eventType || '(sem eventType)'}: ${JSON.stringify(req.body)}`);
+
   if (!eventType) {
     logger.warn('[webhook] Evento recebido sem eventType — ignorado.');
     return;

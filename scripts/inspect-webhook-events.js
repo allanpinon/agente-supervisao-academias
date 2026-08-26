@@ -32,7 +32,7 @@ async function run() {
 
   const lista = Array.isArray(eventos) ? eventos : (eventos?.data || eventos?.items || []);
   const candidatos = lista.filter((e) => {
-    const nome = (typeof e === 'string' ? e : e?.name || e?.type || e?.eventType || '').toUpperCase();
+    const nome = (typeof e === 'string' ? e : e?.event || e?.name || e?.type || e?.eventType || '').toUpperCase();
     return nome.includes('PANEL') || nome.includes('CARD') || nome.includes('FUNIL') || nome.includes('FUNNEL')
       || nome.includes('DEAL') || nome.includes('CLASSIFIC') || nome.includes('STAGE') || nome.includes('STEP');
   });

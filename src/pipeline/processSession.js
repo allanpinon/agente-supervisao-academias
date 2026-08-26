@@ -12,6 +12,7 @@ const sheets = require('../clients/sheets');
 const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../utils/tags');
 const { nowLocal } = require('../utils/dates');
 const { evaluateAndRecordSession } = require('./evaluate');
+const { registerConversionOutcome } = require('./conversion');
 const logger = require('../utils/logger');
 
 async function processSessionNew(session) {
@@ -79,20 +80,36 @@ async function processSessionComplete(session) {
   // O payload do webhook pode vir resumido — busca a sessao completa
   // antes de avaliar, pra ter certeza que temos contactDetails/agentDetails.
   const fullSession = await flwchat.getSession(session.id);
+
+  // ACHADO CRITICO CONFIRMADO (26/08/2026): GET /v2/session/{id} SEMPRE
+  // devolve classification: null, mesmo pra sessoes de verdade
+  // classificadas no GymBot — ver src/pipeline/conversion.js pro relato
+  // completo. O payload CRU do proprio webhook (o parametro `session`
+  // recebido aqui) TRAZ o dado real, entao usamos ele em vez do que veio
+  // (ou melhor, nao veio) no GET.
+  fullSession.classification = session.classification || fullSession.classification;
+
   fullSession.contactDetails = await flwchat.ensureContactDetails(fullSession, logger);
   const atendenteResolvido = await flwchat.resolveAgentName(fullSession, logger);
   fullSession.agentDetails = { ...(fullSession.agentDetails || {}), name: atendenteResolvido };
 
   await evaluateAndRecordSession(fullSession);
 
-  const existing = await sheets.findRowByColumn('atendimentos', 'Session ID (GymBot)', session.id);
+  let existing = await sheets.findRowByColumn('atendimentos', 'Session ID (GymBot)', session.id);
   if (!existing) {
     logger.warn(
       `[processSession] SESSION_COMPLETE para sessao ${session.id} sem linha correspondente ` +
       'em Atendimentos (provavelmente o SESSION_NEW nao chegou) — criando agora.'
     );
     await processSessionNew(fullSession);
-    return;
+    existing = await sheets.findRowByColumn('atendimentos', 'Session ID (GymBot)', session.id);
+    if (!existing) {
+      logger.error(
+        `[processSession] Nao foi possivel localizar/criar a linha de Atendimentos da sessao ` +
+        `${session.id} mesmo apos o fallback — abortando o registro de status/conversao desta sessao.`
+      );
+      return;
+    }
   }
 
   // BUG CORRIGIDO: ate aqui, este UPDATE so tocava em "Status", jogando fora
@@ -114,7 +131,7 @@ async function processSessionComplete(session) {
   // 20/08/2026.
   const marcaPadronizada = resolveMarcaPorAtendente(atendenteResolvido);
   const marca = marcaPadronizada || marcaTag;
-  await sheets.updateRow('atendimentos', existing._rowNumber, {
+  const atendimentoAtualizado = {
     ...existing,
     'Status (Atendido/Fechado)': 'Atendido',
     Marca: marcaPadronizada || existing.Marca || marca || '',
@@ -122,8 +139,21 @@ async function processSessionComplete(session) {
     Atendente: existing.Atendente || atendenteResolvido || '',
     Lead: existing.Lead || fullSession.contactDetails?.name || '',
     'Contact ID (GymBot)': existing['Contact ID (GymBot)'] || fullSession.contactDetails?.id || '',
-  });
+  };
+  await sheets.updateRow('atendimentos', existing._rowNumber, atendimentoAtualizado);
   logger.info(`[processSession] Atendimento concluido: sessao ${session.id}`);
+
+  // So agora que a linha de Atendimentos esta atualizada: se o webhook ja
+  // trouxe uma classificacao (o caso comum — "Concluir" no GymBot abre
+  // direto o modal de classificacao), registra o resultado real
+  // (conversao/nao convertido) na hora, em vez de depender da varredura
+  // de reconciliacao (que, pelo achado acima, nunca vai encontrar essa
+  // classificacao via GET).
+  try {
+    await registerConversionOutcome(fullSession, { ...atendimentoAtualizado, _rowNumber: existing._rowNumber });
+  } catch (err) {
+    logger.warn(`[processSession] Falha ao registrar resultado (conversao/nao convertido) da sessao ${session.id}: ${err.message}`);
+  }
 }
 
 module.exports = { processSessionNew, processSessionComplete };

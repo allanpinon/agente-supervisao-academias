@@ -64,8 +64,32 @@ const config = {
     lookbackDays: parseInt(process.env.RECONCILIATION_LOOKBACK_DAYS || '60', 10),
   },
 
-  // Valor real do enum a confirmar em producao (ver README - "Calibracao pendente").
-  classificationSuccessCategory: process.env.CLASSIFICATION_SUCCESS_CATEGORY || 'OBJECTIVE_ACHIEVED',
+  // ACHADO CRITICO CONFIRMADO COM DADO REAL (26/08/2026): o antigo valor
+  // placeholder abaixo ('OBJECTIVE_ACHIEVED') nunca foi confirmado e nunca
+  // bateu com nada — porque a causa raiz era outra: GET /v2/session/{id}
+  // sempre devolve classification: null (testado com 2 sessoes reais
+  // classificadas de verdade no GymBot), entao a comparacao nunca podia
+  // funcionar por ESSE caminho, seja qual fosse o valor aqui. O dado real
+  // vem do payload CRU do webhook SESSION_COMPLETE (ver
+  // src/pipeline/conversion.js pro relato completo e pra onde a
+  // comparacao de verdade agora acontece).
+  //
+  // LOST: confirmado com dado real em 26/08/2026 — sessao
+  // 6d7f3599-1c8b-47eb-9f86-9e493f56e6c9, classificada no GymBot como
+  // "Objetivo perdido" / "Lead mora longe", chegou no webhook com
+  // classification.category = "LOST".
+  //
+  // WON: AINDA NAO CONFIRMADO. Nao adivinhamos esse valor (o motivo de
+  // todo este bug foi justamente confiar em um valor nao confirmado) —
+  // fica vazio ate um teste real de "Objetivo atingido" (Ganho). Quando
+  // esse teste acontecer, o log do servico vai mostrar uma linha
+  // "[conversion] ... categoria nao mapeada" com o valor exato recebido;
+  // basta definir CLASSIFICATION_CATEGORY_WON com esse valor nas
+  // variaveis de ambiente (Railway) — nao precisa nem de novo deploy.
+  classificationCategories: {
+    LOST: process.env.CLASSIFICATION_CATEGORY_LOST || 'LOST',
+    WON: process.env.CLASSIFICATION_CATEGORY_WON || '',
+  },
 
   // Mapeamento de tags do GymBot -> marca / unidade.
   // IDs confirmados via GET /v1/tag em 19/08/2026.

@@ -6,31 +6,22 @@ const { processSessionNew, processSessionComplete } = require('../pipeline/proce
 const { processPaymentNew } = require('../pipeline/processPayment');
 const logger = require('../utils/logger');
 
-// DIAGNOSTICO EM ANDAMENTO (26/08/2026): investigando por que nenhuma
-// conversao esta sendo gravada, mesmo com negocios reais marcados "Ganho"
-// no GymBot (ex: sessao b0d42dd2-7e4f-47a5-877f-87a7b664a83d, William
-// Quaresma). Confirmado com a API real que `session.classification` vem
-// SEMPRE `null` em GET /v2/session/{id} — a comparacao que
-// src/reconciliation/sweep.js faz contra CLASSIFICATION_SUCCESS_CATEGORY
-// nunca pode bater, entao nenhuma conversao jamais foi gravada por esse
-// caminho. O "Ganho" que aparece na interface do GymBot provavelmente vem
-// de um recurso separado (painel/funil de vendas — ver o evento de
-// webhook PANEL_CARD_STEP_CHANGE, que existe no catalogo da API mas nunca
-// foi assinado nem tem handler). Este handler NAO faz nada com o evento
-// ainda — so loga o payload cru, pra confirmarmos o formato real assim
-// que um cartao mudar de etapa, ANTES de escrever qualquer logica em cima
-// de um formato assumido (mesmo cuidado de sempre: nao inventar dado).
-function logPanelCardStepChange(content) {
-  logger.info(`[webhook] PANEL_CARD_STEP_CHANGE recebido (diagnostico, nao processado ainda): ${JSON.stringify(content)}`);
-}
-
+// INVESTIGACAO RESOLVIDA (26/08/2026): por que nenhuma conversao jamais
+// foi gravada, mesmo com negocios reais marcados "Ganho"/"Perdido" no
+// GymBot. Causa raiz confirmada com dado real: GET /v2/session/{id}
+// SEMPRE devolve classification: null — mas o payload CRU do proprio
+// webhook SESSION_COMPLETE TRAZ o dado real (testado com a sessao
+// 6d7f3599-1c8b-47eb-9f86-9e493f56e6c9: classification.category = "LOST").
+// A hipotese anterior (evento PANEL_CARD_STEP_CHANGE) foi testada com um
+// gatilho real e NAO recebeu nenhum evento — descartada. Ver
+// src/pipeline/conversion.js pro relato completo e pra onde a logica de
+// conversao mora agora.
 const HANDLERS = {
   CONTACT_NEW: (content) => processContactNew(content),
   CONTACT_TAG_UPDATE: (content) => processContactTagUpdate(content),
   SESSION_NEW: (content) => processSessionNew(content),
   SESSION_COMPLETE: (content) => processSessionComplete(content),
   PAYMENT_NEW: (content) => processPaymentNew(content),
-  PANEL_CARD_STEP_CHANGE: (content) => logPanelCardStepChange(content),
 };
 
 async function webhookHandler(req, res) {
@@ -45,23 +36,6 @@ async function webhookHandler(req, res) {
   res.status(200).json({ received: true });
 
   const { eventType, content } = req.body || {};
-
-  // DIAGNOSTICO TEMPORARIO (26/08/2026): investigando onde mora o dado de
-  // classificacao (Objetivo atingido/perdido + motivo especifico, ver a
-  // tela "Classificar atendimento" documentada no projeto). Ja confirmado
-  // que GET /v2/session/{id} sempre devolve `classification: null` — mas
-  // processSessionComplete NUNCA olhou pro `content` cru do proprio
-  // webhook, so usa `content.id` pra rebuscar a sessao via GET (que
-  // descarta silenciosamente qualquer coisa que o payload do webhook
-  // tivesse a mais). Testamos assinar PANEL_CARD_STEP_CHANGE (evento
-  // "Painel - Card movido") como hipotese de onde a classificacao mora,
-  // mas nenhum evento de Painel chegou nem uma vez apos uma classificacao
-  // real de teste — entao ou o card do Painel nao e criado/movido por
-  // esse fluxo de classificacao no chat, ou tem algum delay/config que
-  // ainda nao identificamos. Enquanto isso, logando o corpo CRU de TODO
-  // evento recebido (nao so os sem handler) pra comparar com o que GET
-  // devolve — remover este log depois que o campo certo for encontrado.
-  logger.info(`[webhook] RAW ${eventType || '(sem eventType)'}: ${JSON.stringify(req.body)}`);
 
   if (!eventType) {
     logger.warn('[webhook] Evento recebido sem eventType — ignorado.');

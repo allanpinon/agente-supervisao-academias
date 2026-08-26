@@ -133,9 +133,24 @@ async function importarAtendimento(session, atendimentosIndex) {
 
 // So chamado para a fracao de sessoes que de fato converteram — por isso
 // pode dar 1-2 leituras pontuais na API sem risco de estourar a cota.
+//
+// LIMITACAO CONFIRMADA (26/08/2026): as sessoes historicas aqui vem de
+// flwchat.listSessions()/getSession() — o mesmo caminho GET que
+// confirmamos SEMPRE devolver classification: null, mesmo pra sessoes de
+// verdade classificadas no GymBot (ver src/pipeline/conversion.js pro
+// relato completo). Ou seja: esta funcao, na pratica, nunca vai encontrar
+// nenhuma conversao pra importar em dado historico — nao existe payload
+// de webhook cru pra sessoes antigas, que era o unico lugar onde a
+// classificacao real aparece. Mantida mesmo assim (com a mesma config
+// usada em tempo real, pra nao ter duas fontes de verdade) como rede de
+// seguranca caso a API do GymBot passe a preencher esse campo no GET no
+// futuro. Recuperar conversoes historicas anteriores a esta correcao
+// exige conferencia manual contra o GymBot — nao ha caminho de API.
 async function importarConversao(session, avaliacoesIndex, conversoesIndex, atendimentosIndex) {
   const category = session.classification?.category;
-  if (category !== config.classificationSuccessCategory) return;
+  // So conta como conversao a categoria WON explicitamente confirmada em
+  // config (ver config.js) — nunca por chute.
+  if (!category || !config.classificationCategories.WON || category !== config.classificationCategories.WON) return;
   if (conversoesIndex.has(session.id)) return;
 
   const { marca: marcaTag, unidade } = resolveMarcaUnidade(extractTagsId(session.contactDetails));
@@ -164,7 +179,7 @@ async function importarConversao(session, avaliacoesIndex, conversoesIndex, aten
     Lead: session.contactDetails?.name || '',
     Valor: session.classification?.amount ?? '',
     'Session ID (GymBot)': session.id,
-    Motivo: category,
+    Motivo: session.classification?.categoryDescription?.trim() || session.classification?.categoryName || category,
     'Dias até Conversão': dataOrigemLead
       ? Math.max(0, Math.round(diffInDays(dataOrigemLead, dataClassificacao)))
       : '',

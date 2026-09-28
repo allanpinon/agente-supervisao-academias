@@ -62,58 +62,19 @@ function marcaEfetiva(row) {
 
 const UNIDADE_NAO_IDENTIFICADA = 'Unidade não identificada';
 
-// Dimensoes da rubrica de excelencia (ver src/rubric.js), na mesma ordem
-// em que sao gravadas em Avaliações (ver src/pipeline/evaluate.js).
-const DIMENSOES = [
-  { campo: 'Nota Cordialidade', label: 'Cordialidade' },
-  { campo: 'Nota Personalização', label: 'Personalização' },
-  { campo: 'Nota Clareza da Oferta', label: 'Clareza da Oferta' },
-  { campo: 'Nota Tratamento Objeções', label: 'Tratamento de Objeções' },
-  { campo: 'Nota Fechamento/CTA', label: 'Fechamento/CTA' },
-  { campo: 'Nota Follow-up', label: 'Follow-up' },
-];
-
-// Nota >= 4 (de 1 a 5) e considerado "dentro do padrao de excelencia".
-const NOTA_MINIMA_OK = 4;
-
-function media(nums) {
-  return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
-}
-
-// Metricas OBJETIVAS de um grupo de avaliacoes (convertidos, nao
-// convertidos ou em aberto), calculadas direto das notas 1-5 ja gravadas
-// em cada linha de Avaliações — nunca estimadas/narradas pela Claude.
-// Pedido explicito do usuario (22/08/2026): "o qualitativo precisa ser
-// mais objetivo, com levantamento em percentuais" — e a mesma preocupacao
-// de nao criar informacao inveridica ja levantada antes sobre o relatorio.
-// Este calculo e passado (a) pra Claude, como contexto pra alinhar a
-// narrativa da sintese com o numero real (sem inventar um novo), e (b)
-// direto pro texto final do relatorio (src/reports/format.js), que
-// imprime esses percentuais sem depender do texto gerado por Claude.
-function computeMetricas(avaliacoesGrupo) {
-  if (!avaliacoesGrupo.length) return null;
-  const n = avaliacoesGrupo.length;
-  const notasGerais = avaliacoesGrupo
-    .map((a) => Number(a['Nota Geral (1-5)']))
-    .filter(Number.isFinite);
-  const dimensoes = DIMENSOES.map(({ campo, label }) => {
-    const notas = avaliacoesGrupo.map((a) => Number(a[campo])).filter(Number.isFinite);
-    const percentOk = notas.length
-      ? (notas.filter((v) => v >= NOTA_MINIMA_OK).length / notas.length) * 100
-      : null;
-    return {
-      campo, label, media: media(notas), percentOk, n: notas.length,
-    };
-  });
-  return { n, mediaGeral: media(notasGerais), dimensoes };
-}
+// CORTE DO QUALITATIVO (28/09/2026): decisao explicita do usuario apos 2
+// semanas em producao — parar de gastar credito de API (Claude) e de ler
+// a aba Avaliações, que deixou de ser alimentada (ver
+// src/pipeline/processSession.js e src/reconciliation/sweep.js). Removido
+// daqui: leitura de 'avaliacoes', DIMENSOES/computeMetricas (percentuais
+// de rubrica) e tudo que dependia dessas notas. O que sobra e 100%
+// contagem direta de Leads/Atendimentos/Conversões.
 
 async function computeReportData(marca, { start, end }) {
-  const [leads, atendimentos, conversoes, avaliacoes] = await Promise.all([
+  const [leads, atendimentos, conversoes] = await Promise.all([
     sheets.readAll('leads'),
     sheets.readAll('atendimentos'),
     sheets.readAll('conversoes'),
-    sheets.readAll('avaliacoes'),
   ]);
 
   const marcaAlvo = normalize(marca);
@@ -141,9 +102,11 @@ async function computeReportData(marca, { start, end }) {
   // planilha inteira) direto nesses calculos agora contaria leads perdidos
   // como se tivessem convertido.
   const conversoesGanhasMarca = conversoesMarca.filter((c) => c.Resultado === 'Convertido');
-  const avaliacoesMarca = avaliacoes.filter(
-    (v) => normalize(marcaEfetiva(v)) === marcaAlvo && inRange(v['Data/Hora'], start, end)
-  );
+  // Perdidos: mesma logica de Ganhos, so filtrando pelo outro Resultado —
+  // faltava antes (so Convertido era exibido/contado no relatorio; Perdido
+  // ja era gravado na planilha desde 26/08/2026, so nunca tinha sido
+  // somado pro texto do relatorio).
+  const conversoesPerdidasMarca = conversoesMarca.filter((c) => c.Resultado === 'Não convertido');
 
   // Quantitativo do status REAL de cada atendimento no momento em que o
   // relatorio fecha — pedido explicito do usuario (22/08/2026): "é bom
@@ -199,12 +162,17 @@ async function computeReportData(marca, { start, end }) {
       conversoesGanhasMarca.filter((c) => c.Unidade === unidade),
       'Contact ID (GymBot)'
     );
+    const perdidosU = uniqueBy(
+      conversoesPerdidasMarca.filter((c) => c.Unidade === unidade),
+      'Contact ID (GymBot)'
+    );
     const conversao = leadsU.length ? (fechadosU.length / leadsU.length) * 100 : 0;
     return {
       unidade,
       leads: leadsU.length,
       atendidos: atendidosU.length,
       fechados: fechadosU.length,
+      perdidos: perdidosU.length,
       conversaoPercent: conversao,
     };
   });
@@ -232,6 +200,10 @@ async function computeReportData(marca, { start, end }) {
     'Contact ID (GymBot)'
   );
   if (leadsSemUnidade.length || atendidosSemUnidade.length || fechadosSemUnidade.length) {
+    const perdidosSemUnidade = uniqueBy(
+      conversoesPerdidasMarca.filter((c) => !unidadesConhecidas.has(c.Unidade)),
+      'Contact ID (GymBot)'
+    );
     const conversaoSemUnidade = leadsSemUnidade.length
       ? (fechadosSemUnidade.length / leadsSemUnidade.length) * 100
       : 0;
@@ -240,6 +212,7 @@ async function computeReportData(marca, { start, end }) {
       leads: leadsSemUnidade.length,
       atendidos: atendidosSemUnidade.length,
       fechados: fechadosSemUnidade.length,
+      perdidos: perdidosSemUnidade.length,
       conversaoPercent: conversaoSemUnidade,
     });
   }
@@ -255,40 +228,22 @@ async function computeReportData(marca, { start, end }) {
       conversoesGanhasMarca.filter((c) => c.Atendente === atendente),
       'Contact ID (GymBot)'
     );
+    const perdidosA = uniqueBy(
+      conversoesPerdidasMarca.filter((c) => c.Atendente === atendente),
+      'Contact ID (GymBot)'
+    );
     const conversao = atendidosA.length ? (fechadosA.length / atendidosA.length) * 100 : 0;
-    const avaliacoesA = avaliacoesMarca.filter((v) => v.Atendente === atendente);
-    // Separadas por resultado. "Em aberto" (atendimento feito, lead ainda
-    // sem decisao) ENTRA na sintese qualitativa tambem — decisao explicita
-    // do usuario (21/08/2026): a avaliacao da qualidade do atendimento em
-    // si (cordialidade, personalizacao, clareza, tratamento de objecoes,
-    // tentativa de fechamento) nao deveria esperar o lead converter ou nao
-    // pra existir, principalmente no relatorio diario, onde a imensa
-    // maioria dos atendimentos do proprio dia ainda esta "Em aberto" (a
-    // varredura de reconciliacao so classifica depois). Antes disso, o
-    // relatorio diario praticamente nunca tinha nada pra mostrar na parte
-    // qualitativa, mesmo com avaliacoes reais gravadas.
-    const avaliacoesConvertidas = avaliacoesA.filter((v) => v.Resultado === 'Convertido');
-    const avaliacoesNaoConvertidas = avaliacoesA.filter((v) => v.Resultado === 'Não convertido');
-    const avaliacoesEmAberto = avaliacoesA.filter((v) => v.Resultado === 'Em aberto' || !v.Resultado);
     return {
       atendente,
       atendidos: atendidosA.length,
       fechados: fechadosA.length,
+      perdidos: perdidosA.length,
       conversaoPercent: conversao,
-      avaliacoesConvertidas,
-      avaliacoesNaoConvertidas,
-      avaliacoesEmAberto,
-      // Percentuais objetivos por dimensao da rubrica, um grupo para cada
-      // segmento (null quando o grupo esta vazio) — ver computeMetricas.
-      metricas: {
-        convertidos: computeMetricas(avaliacoesConvertidas),
-        naoConvertidos: computeMetricas(avaliacoesNaoConvertidas),
-        emAberto: computeMetricas(avaliacoesEmAberto),
-      },
     };
   });
 
   const fechadosGeralUnicos = uniqueBy(conversoesGanhasMarca, 'Contact ID (GymBot)').length;
+  const perdidosGeralUnicos = uniqueBy(conversoesPerdidasMarca, 'Contact ID (GymBot)').length;
   const conversaoGeral = leadsUnicos.length ? (fechadosGeralUnicos / leadsUnicos.length) * 100 : 0;
 
   const diasConversao = conversoesGanhasMarca
@@ -310,6 +265,7 @@ async function computeReportData(marca, { start, end }) {
     conversaoGeralPercent: conversaoGeral,
     tempoMedioConversaoDias: tempoMedioConversao,
     fechadosGeral: fechadosGeralUnicos,
+    perdidosGeral: perdidosGeralUnicos,
     statusAtendimentos,
   };
 }

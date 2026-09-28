@@ -11,7 +11,6 @@ const flwchat = require('../clients/flwchat');
 const sheets = require('../clients/sheets');
 const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../utils/tags');
 const { nowLocal } = require('../utils/dates');
-const { evaluateAndRecordSession } = require('./evaluate');
 const { registerConversionOutcome } = require('./conversion');
 const logger = require('../utils/logger');
 
@@ -93,7 +92,13 @@ async function processSessionComplete(session) {
   const atendenteResolvido = await flwchat.resolveAgentName(fullSession, logger);
   fullSession.agentDetails = { ...(fullSession.agentDetails || {}), name: atendenteResolvido };
 
-  await evaluateAndRecordSession(fullSession);
+  // CORTE DO QUALITATIVO (28/09/2026): decisao explicita do usuario apos
+  // 2 semanas rodando em producao — a avaliacao por rubrica (Claude) foi
+  // desligada. Motivos: (1) nao usar credito de API pra isso, (2) o
+  // relatorio passa a ser 100% contagem direta da planilha. A chamada
+  // `evaluateAndRecordSession(fullSession)` que rodava aqui foi removida.
+  // Nao apagamos `src/pipeline/evaluate.js` (fica sem uso, pra religar
+  // facil se decidirem voltar) — so paramos de chama-lo.
 
   let existing = await sheets.findRowByColumn('atendimentos', 'Session ID (GymBot)', session.id);
   if (!existing) {

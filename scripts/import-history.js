@@ -16,7 +16,6 @@ require('dotenv').config();
 const flwchat = require('../src/clients/flwchat');
 const sheets = require('../src/clients/sheets');
 const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../src/utils/tags');
-const { evaluateAndRecordSession } = require('../src/pipeline/evaluate');
 const { nowLocal, diffInDays } = require('../src/utils/dates');
 const { config } = require('../src/config');
 const logger = require('../src/utils/logger');
@@ -313,11 +312,13 @@ async function run() {
         // eslint-disable-next-line no-await-in-loop
         await importarAtendimento(session, atendimentosIndex);
 
-        if (!avaliacoesIndex.has(session.id)) {
-          // eslint-disable-next-line no-await-in-loop
-          await evaluateAndRecordSession(session);
-          avaliacoesIndex.set(session.id, true);
-        }
+        // CORTE DO QUALITATIVO (28/09/2026): a chamada a
+        // evaluateAndRecordSession (Claude) que rodava aqui foi removida —
+        // decisao explicita do usuario de nao gastar credito de API,
+        // inclusive na importacao historica. `avaliacoesIndex` continua
+        // sendo passado pra importarConversao abaixo, que so usa pra achar
+        // a data do PRIMEIRO atendimento (nao depende de avaliacao
+        // existir).
 
         // eslint-disable-next-line no-await-in-loop
         await importarConversao(session, avaliacoesIndex, conversoesIndex, atendimentosIndex);

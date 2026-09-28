@@ -18,7 +18,6 @@ const flwchat = require('../clients/flwchat');
 const sheets = require('../clients/sheets');
 const { config } = require('../config');
 const { nowLocal } = require('../utils/dates');
-const { evaluateAndRecordSession } = require('../pipeline/evaluate');
 const { registerConversionOutcome, marcarResultadoAvaliacao } = require('../pipeline/conversion');
 const logger = require('../utils/logger');
 
@@ -65,34 +64,13 @@ async function runReconciliationSweep() {
       continue;
     }
 
-    // Fecha a leitura QUALITATIVA de todo atendimento pendente, independente
-    // do status atual (Em andamento/Atendido) — pedido explicito do usuario
-    // (22/08/2026): "o qualitativo precisa ser fechado independente do
-    // status atual". Antes desta correcao, um atendimento so ganhava uma
-    // linha em Avaliações quando o SESSION_COMPLETE do GymBot chegava (ver
-    // src/pipeline/processSession.js) — se isso ainda nao tivesse
-    // acontecido no momento do relatorio (sessao ainda "Em andamento", ex:
-    // atendente ainda nao assumiu a conversa, ou o evento simplesmente
-    // ainda nao chegou), o atendimento ficava com dado quantitativo
-    // (aparecia em "Por atendente"/totais) mas NENHUM dado qualitativo —
-    // nem "Convertido"/"Nao convertido" nem "Em aberto", pois nao existia
-    // linha nenhuma em Avaliações pra ele (achado real ao investigar por
-    // que a Samia Borges aparecia sem secao qualitativa em 20/08/2026).
-    // evaluateAndRecordSession ja e idempotente (verifica se ja existe
-    // avaliacao pra esta Session ID antes de gastar qualquer chamada —
-    // Claude incluida — e ja tolera sessao sem mensagem alguma, retornando
-    // sem gravar nada), entao chamar aqui pra toda sessao pendente e seguro
-    // e so gera uma avaliacao nova de fato na primeira vez que a sessao e
-    // vista sem uma. Ressalva: se a sessao ainda estiver "Em andamento" e a
-    // conversa continuar depois deste ponto, a avaliacao gravada agora fica
-    // baseada no transcript parcial ate aqui — nao e re-executada
-    // automaticamente depois (mesma limitacao, documentada, do desenho
-    // atual de "uma avaliacao por sessao").
-    try {
-      await evaluateAndRecordSession(session);
-    } catch (err) {
-      logger.warn(`[sweep] Falha ao gerar avaliacao qualitativa da sessao ${sessionId}: ${err.message}`);
-    }
+    // CORTE DO QUALITATIVO (28/09/2026): esta varredura chamava
+    // `evaluateAndRecordSession(session)` aqui pra toda sessao pendente —
+    // removido por decisao explicita do usuario (zero uso de credito de
+    // API da Claude). `marcarResultadoAvaliacao`, chamado mais abaixo e no
+    // bloco de expirados, agora e um no-op seguro (a aba Avaliações nao
+    // recebe mais linha nenhuma) — mantido so pra nao ter que mexer em
+    // mais lugares.
 
     // ACHADO CRITICO (26/08/2026): esta releitura via GET NUNCA traz
     // classification preenchido (confirmado com dado real — ver

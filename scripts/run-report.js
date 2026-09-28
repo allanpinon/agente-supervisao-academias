@@ -2,9 +2,10 @@
 // agendamento normal do servico (isso continua em src/jobs/scheduler.js,
 // 22:00 todos os dias). Serve pra gerar o relatorio de um dia especifico
 // sob demanda — util pra testar o pipeline inteiro (varredura de
-// reconciliacao -> calculo -> sintese qualitativa via Claude -> gravacao
-// das sinteses -> formatacao -> envio no WhatsApp) contra dado real, sem
-// esperar o horario do cron ou o dia seguinte.
+// reconciliacao -> calculo -> formatacao -> envio no WhatsApp) contra
+// dado real, sem esperar o horario do cron ou o dia seguinte.
+// CORTE DO QUALITATIVO (28/09/2026): nao chama mais Claude em nenhum
+// ponto — nem aqui, nem no relatorio real.
 //
 // ATENCAO: por padrao ESTE SCRIPT ENVIA DE VERDADE pros dois grupos do
 // WhatsApp (Greco Forma e Fit.com) — mesmo comportamento do relatorio real,
@@ -75,7 +76,6 @@ async function run() {
     // enviado.
     const { runReconciliationSweep } = require('../src/reconciliation/sweep');
     const { computeReportData } = require('../src/reports/compute');
-    const { synthesizeAttendants } = require('../src/reports/synthesize');
     const { formatReport } = require('../src/reports/format');
 
     if (!skipSweep) {
@@ -90,16 +90,8 @@ async function run() {
     for (const marca of config.marcas) {
       // eslint-disable-next-line no-await-in-loop
       const data = await computeReportData(marca, periodo);
-      // Igual ao relatorio diario real (src/reports/send.js): so
-      // semanal/mensal usam o Manual de Boas Praticas como contexto extra
-      // na sintese — o diario fica sem, de proposito. Este script so
-      // suporta "diario" por enquanto, entao manualContext fica sempre
-      // null, pra o texto do dry-run bater exatamente com o que o envio
-      // real produziria.
-      // eslint-disable-next-line no-await-in-loop
-      const sinteses = await synthesizeAttendants(data.porAtendente, 'Diário', null);
       const texto = formatReport({
-        marca, tipoLabel: 'Diário', dataLabel, data, sinteses,
+        marca, tipoLabel: 'Diário', dataLabel, data,
       });
       console.log(`\n========== DRY-RUN — ${marca} — ${dataLabel} (nada foi enviado) ==========`);
       console.log(texto);

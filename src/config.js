@@ -126,7 +126,11 @@ const config = {
 function assertConfigured() {
   const missing = [];
   if (!config.flwchat.apiToken) missing.push('FLWCHAT_API_TOKEN');
-  if (!config.anthropic.apiKey) missing.push('ANTHROPIC_API_KEY');
+  // ANTHROPIC_API_KEY NAO e mais obrigatoria (28/09/2026): a avaliacao
+  // qualitativa (src/pipeline/evaluate.js, src/reports/synthesize.js,
+  // src/reports/manual.js) foi desligada do fluxo normal — decisao
+  // explicita do usuario, pra nao gastar credito de API. Os arquivos
+  // continuam no repo (caso decidam religar), so nao sao mais chamados.
   if (!config.google.serviceAccountJson) missing.push('GOOGLE_SERVICE_ACCOUNT_JSON');
   if (!config.evolution.apiUrl) missing.push('EVOLUTION_API_URL');
   if (!config.evolution.instance) missing.push('EVOLUTION_INSTANCE');

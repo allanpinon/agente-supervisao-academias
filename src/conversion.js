@@ -172,6 +172,14 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
     } catch (err) {
       logger.error(`[conversion] Falha inesperada ao tentar enviar conversao da sessao ${sessionId} pro Meta: ${err.message}`);
     }
+  } else if (resultado === 'Convertido' && resultadoAnterior === 'Convertido') {
+    // Log explicito pra este caso NAO ficar em silencio (ambiguo demais pra
+    // diagnosticar depois): sem esta linha, "pulei de proposito porque ja
+    // tava Convertido" e "o modulo metaCapi nem rodou por causa de um
+    // problema de deploy" ficavam indistinguiveis so lendo o log — achado
+    // real em teste de 01/10/2026 (sessao 8775b6d4), investigado e corrigido
+    // nesta mudanca.
+    logger.info(`[conversion] Sessao ${sessionId} ja estava "Convertido" antes desta chamada — evento NAO reenviado pro Meta (evita duplicidade).`);
   }
 
   return { novaLinha: !existente, atualizada: Boolean(existente) };

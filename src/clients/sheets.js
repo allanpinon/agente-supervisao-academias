@@ -23,6 +23,15 @@ const SHEETS = {
       // aba real no Google Sheets precisa ganhar estas mesmas colunas, nesta
       // mesma ordem, no final da planilha real, antes do proximo deploy.
       'Telefone', 'Instagram', 'E-mail', 'UTM Medium', 'UTM Campaign', 'UTM Clid',
+      // Adicionada em 01/10/2026 — pedido do usuario: contar quantas vezes
+      // este lead ja entrou em contato (sessoes em Atendimentos com o mesmo
+      // Contact ID), para enxergar o comportamento de reativacao ao longo
+      // do tempo. "Leads" nao ganha linha nova a cada sessao (fica 1 por
+      // contato, por decisao do usuario — ver claude/arquitetura-agente-supervisao.md,
+      // "entendi, entao isso vai pra planilha de atendimento, e nao de lead"),
+      // entao este campo e ATUALIZADO na linha existente a cada nova sessao
+      // deste contato (processSessionNew), nao incrementado cegamente.
+      'Qtd. de Contatos',
     ],
   },
   atendimentos: {
@@ -77,6 +86,11 @@ const SHEETS = {
       // atualizado manualmente na mesma ordem antes do proximo deploy.
       'Telefone', 'Instagram', 'E-mail', 'Origem (Paga/Orgânica)',
       'UTM Source', 'UTM Medium', 'UTM Campaign', 'UTM Clid',
+      // Adicionada em 01/10/2026 — mesmo raciocinio da coluna em "Leads":
+      // quantos atendimentos (sessoes) este Contact ID ja teve ate o
+      // momento desta classificacao — util pra ver, por exemplo, que uma
+      // conversao veio so depois do 3o contato, nao do primeiro.
+      'Qtd. de Contatos',
     ],
   },
   avaliacoes: {
@@ -307,6 +321,25 @@ async function findEarliestRowByColumn(sheetKey, matchHeader, matchValue, dateHe
   return earliest || candidatas[0];
 }
 
+// Conta quantas linhas de uma planilha tem um valor especifico numa
+// coluna (ex: quantos atendimentos um Contact ID especifico ja teve).
+// Mesmo custo de uma leitura completa (como findRowByColumn) — adequado
+// para uso ocasional (1x por evento em tempo real), nao para uso em lote
+// (nesse caso, prefira buildIndex + contagem em memoria).
+async function countRowsByColumn(sheetKey, header, value) {
+  if (!value) return 0;
+  const rows = await readAll(sheetKey);
+  return rows.filter((r) => r[header] === value).length;
+}
+
 module.exports = {
-  SHEETS, appendRow, readAll, updateRow, findRowByColumn, findEarliestRowByColumn, buildIndex, replaceAll,
+  SHEETS,
+  appendRow,
+  readAll,
+  updateRow,
+  findRowByColumn,
+  findEarliestRowByColumn,
+  buildIndex,
+  replaceAll,
+  countRowsByColumn,
 };

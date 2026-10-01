@@ -49,6 +49,7 @@ const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require
 const { extractContactInfo } = require('../utils/contact');
 const { nowLocal, diffInDays } = require('../utils/dates');
 const logger = require('../utils/logger');
+const metaCapi = require('../integrations/metaCapi');
 
 async function marcarResultadoAvaliacao(sessionId, resultado) {
   if (!sessionId) return;
@@ -100,6 +101,14 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
   // 01/10/2026, em claude/arquitetura-agente-supervisao.md).
   const info = extractContactInfo(contactDetails);
 
+  // Quantas vezes este lead ja entrou em contato (sessoes em Atendimentos
+  // com este Contact ID) ate esta classificacao — pedido do usuario
+  // (01/10/2026), mesmo raciocinio da coluna equivalente em "Leads" (ver
+  // src/pipeline/processSession.js e claude/arquitetura-agente-supervisao.md).
+  const qtdContatos = contactIdAtual
+    ? await sheets.countRowsByColumn('atendimentos', 'Contact ID (GymBot)', contactIdAtual)
+    : '';
+
   const linha = {
     'Data/Hora': dataClassificacao,
     Marca: marca,
@@ -125,16 +134,55 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
     'UTM Medium': info.utmMedium,
     'UTM Campaign': info.utmCampaign,
     'UTM Clid': info.utmClid,
+    'Qtd. de Contatos': qtdContatos,
   };
 
   const existente = await sheets.findRowByColumn('conversoes', 'Session ID (GymBot)', sessionId);
+  // Guardado ANTES de sobrescrever — e o que decide, logo abaixo, se esta
+  // chamada e uma transicao NOVA pra "Convertido" (dispara Meta CAPI) ou
+  // so uma atualizacao/reentrega que ja estava "Convertido" antes (nao
+  // dispara de novo, evita duplicar o evento de conversao no Meta).
+  const resultadoAnterior = existente?.Resultado;
+
   if (existente) {
     const mudou = Object.keys(linha).some((k) => String(existente[k] ?? '') !== String(linha[k] ?? ''));
     if (mudou) await sheets.updateRow('conversoes', existente._rowNumber, linha);
-    return { novaLinha: false, atualizada: mudou };
+  } else {
+    await sheets.appendRow('conversoes', linha);
   }
-  await sheets.appendRow('conversoes', linha);
-  return { novaLinha: true, atualizada: false };
+
+  // Envio pro Meta Ads (Conversions API) — so na transicao DE/PARA
+  // "Convertido" (primeira vez que fecha, ou corrigida de "Nao
+  // convertido" pra "Convertido"). Nunca reenvia se a sessao ja estava
+  // "Convertido" antes desta chamada (reentrega do mesmo webhook
+  // SESSION_COMPLETE — ja confirmado que o GymBot faz isso — ou so um
+  // campo novo sendo preenchido). Nunca lanca excecao: metaCapi.
+  // enviarConversao ja captura os proprios erros e so loga; o try/catch
+  // aqui e so uma segunda rede de seguranca.
+  if (resultado === 'Convertido' && resultadoAnterior !== 'Convertido') {
+    try {
+      await metaCapi.enviarConversao({
+        marca,
+        telefone: info.telefone,
+        email: info.email,
+        valor: classification.amount,
+        dataHora: dataClassificacao,
+        sessionId,
+      });
+    } catch (err) {
+      logger.error(`[conversion] Falha inesperada ao tentar enviar conversao da sessao ${sessionId} pro Meta: ${err.message}`);
+    }
+  } else if (resultado === 'Convertido' && resultadoAnterior === 'Convertido') {
+    // Log explicito pra este caso NAO ficar em silencio (ambiguo demais pra
+    // diagnosticar depois): sem esta linha, "pulei de proposito porque ja
+    // tava Convertido" e "o modulo metaCapi nem rodou por causa de um
+    // problema de deploy" ficavam indistinguiveis so lendo o log — achado
+    // real em teste de 01/10/2026 (sessao 8775b6d4), investigado e corrigido
+    // nesta mudanca.
+    logger.info(`[conversion] Sessao ${sessionId} ja estava "Convertido" antes desta chamada — evento NAO reenviado pro Meta (evita duplicidade).`);
+  }
+
+  return { novaLinha: !existente, atualizada: Boolean(existente) };
 }
 
 // `session` precisa ter `.classification` (do webhook cru ou, no futuro,

@@ -52,10 +52,19 @@ async function processSessionNew(session) {
   // reativacao. Isso ainda nao muda o relatorio — e a base de dado que vai
   // se acumulando pra, mais pra frente, dar pra medir esse padrao (lead que
   // nao fecha na hora mas volta e fecha depois).
+  // Mesma leitura de atendimentosAtuais serve tambem pra contar quantas
+  // vezes este lead ja entrou em contato (inclui a sessao atual no total)
+  // — usado pra manter a coluna "Qtd. de Contatos" da planilha Leads
+  // atualizada a cada nova sessao deste mesmo Contact ID. Pedido do
+  // usuario (01/10/2026): "conseguimos criar na planilha de leads e de
+  // conversao a contagem de vezes que este lead entrou em contato com a
+  // gente?" — ver claude/arquitetura-agente-supervisao.md.
   let classificacaoLead = '';
+  let qtdContatos = 1;
   if (contactDetails?.id) {
-    const atendimentoAnterior = atendimentosAtuais.find((r) => r['Contact ID (GymBot)'] === contactDetails.id);
-    classificacaoLead = atendimentoAnterior ? 'Recorrente' : 'Novo';
+    const atendimentosDoContato = atendimentosAtuais.filter((r) => r['Contact ID (GymBot)'] === contactDetails.id);
+    classificacaoLead = atendimentosDoContato.length ? 'Recorrente' : 'Novo';
+    qtdContatos = atendimentosDoContato.length + 1;
   }
 
   const row = {
@@ -73,6 +82,24 @@ async function processSessionNew(session) {
   };
   await sheets.appendRow('atendimentos', row);
   logger.info(`[processSession] Novo atendimento registrado: sessao ${session.id}`);
+
+  // Atualiza o contador na linha de Leads deste contato (Leads nao ganha
+  // linha nova por sessao — fica 1 por contato, por decisao do usuario).
+  // Nao bloqueia/derruba o registro do atendimento se isso falhar (ex:
+  // lead ainda sem linha em Leads, caso raro de CONTACT_NEW nao ter
+  // chegado) — so loga um aviso.
+  if (contactDetails?.id) {
+    try {
+      const leadRow = await sheets.findRowByColumn('leads', 'Contact ID (GymBot)', contactDetails.id);
+      if (leadRow) {
+        await sheets.updateRow('leads', leadRow._rowNumber, { ...leadRow, 'Qtd. de Contatos': qtdContatos });
+      } else {
+        logger.warn(`[processSession] Contato ${contactDetails.id} sem linha em Leads ainda — "Qtd. de Contatos" nao atualizada.`);
+      }
+    } catch (err) {
+      logger.warn(`[processSession] Falha ao atualizar "Qtd. de Contatos" em Leads para o contato ${contactDetails.id}: ${err.message}`);
+    }
+  }
 }
 
 async function processSessionComplete(session) {

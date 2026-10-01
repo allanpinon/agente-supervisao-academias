@@ -16,6 +16,14 @@ require('dotenv').config();
 const flwchat = require('../src/clients/flwchat');
 const sheets = require('../src/clients/sheets');
 const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../src/utils/tags');
+// Adicionado em 01/10/2026 — alinha o importador historico com o mesmo
+// helper ja usado em tempo real (src/pipeline/processContact.js e
+// src/pipeline/conversion.js), pra que qualquer sessao de setembro
+// recuperada por este script venha com Telefone/Instagram/E-mail/UTM
+// preenchidos igual a uma sessao capturada ao vivo — sem isso, este
+// importador continuaria gravando essas colunas sempre em branco mesmo
+// depois da atualizacao de 01/10/2026 (ver claude/arquitetura-agente-supervisao.md).
+const { extractContactInfo } = require('../src/utils/contact');
 const { nowLocal, diffInDays } = require('../src/utils/dates');
 const { config } = require('../src/config');
 const logger = require('../src/utils/logger');
@@ -48,16 +56,25 @@ async function importarLead(session, leadsIndex) {
   // prioridade sobre a tag — ver comentario equivalente em
   // src/pipeline/processSession.js.
   const marca = resolveMarcaPorAtendente(session.agentDetails?.name) || marcaTag;
+  // Mesmo helper usado em processContactNew (tempo real) — ver comentario
+  // no topo do arquivo sobre o porque desta mudanca (01/10/2026).
+  const info = extractContactInfo(contact);
   const row = {
     'Data/Hora': contact.createdAt || session.createdAt || '',
     Marca: marca || '',
     Unidade: unidade || '',
     'Nome do Lead': contact.name || '',
     Canal: contact.instagram ? 'Instagram' : 'WhatsApp',
-    'Origem (Paga/Orgânica)': (contact.utm?.source || contact.utm?.campaign) ? 'Paga' : 'Orgânica',
-    'UTM Source': contact.utm?.source || '',
+    'Origem (Paga/Orgânica)': info.origemPagaOrganica,
+    'UTM Source': info.utmSource,
     Atendente: session.agentDetails?.name || '',
     'Contact ID (GymBot)': contact.id,
+    Telefone: info.telefone,
+    Instagram: info.instagram,
+    'E-mail': info.email,
+    'UTM Medium': info.utmMedium,
+    'UTM Campaign': info.utmCampaign,
+    'UTM Clid': info.utmClid,
   };
   await sheets.appendRow('leads', row);
   leadsIndex.set(contact.id, row);
@@ -169,6 +186,9 @@ async function importarConversao(session, avaliacoesIndex, conversoesIndex, aten
   // sessao atual ja esta no indice quando chegamos aqui).
   const primeiroAtendimento = primeiroAtendimentoDoContato(session.contactDetails?.id, atendimentosIndex);
   const dataOrigemLead = primeiroAtendimento?.['Data/Hora'] || session.contactDetails?.createdAt;
+  // Mesmo helper usado em registrarClassificacao (tempo real) — ver
+  // comentario no topo do arquivo sobre o porque desta mudanca (01/10/2026).
+  const info = extractContactInfo(session.contactDetails);
 
   await sheets.appendRow('conversoes', {
     'Data/Hora': dataClassificacao,
@@ -188,6 +208,14 @@ async function importarConversao(session, avaliacoesIndex, conversoesIndex, aten
       ? Math.max(0, Math.round(diffInDays(dataOrigemLead, dataClassificacao)))
       : '',
     'Contact ID (GymBot)': session.contactDetails?.id || '',
+    Telefone: info.telefone,
+    Instagram: info.instagram,
+    'E-mail': info.email,
+    'Origem (Paga/Orgânica)': info.origemPagaOrganica,
+    'UTM Source': info.utmSource,
+    'UTM Medium': info.utmMedium,
+    'UTM Campaign': info.utmCampaign,
+    'UTM Clid': info.utmClid,
   });
   conversoesIndex.set(session.id, true);
 

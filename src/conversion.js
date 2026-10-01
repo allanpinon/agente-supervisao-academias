@@ -101,6 +101,14 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
   // 01/10/2026, em claude/arquitetura-agente-supervisao.md).
   const info = extractContactInfo(contactDetails);
 
+  // Quantas vezes este lead ja entrou em contato (sessoes em Atendimentos
+  // com este Contact ID) ate esta classificacao — pedido do usuario
+  // (01/10/2026), mesmo raciocinio da coluna equivalente em "Leads" (ver
+  // src/pipeline/processSession.js e claude/arquitetura-agente-supervisao.md).
+  const qtdContatos = contactIdAtual
+    ? await sheets.countRowsByColumn('atendimentos', 'Contact ID (GymBot)', contactIdAtual)
+    : '';
+
   const linha = {
     'Data/Hora': dataClassificacao,
     Marca: marca,
@@ -126,6 +134,7 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
     'UTM Medium': info.utmMedium,
     'UTM Campaign': info.utmCampaign,
     'UTM Clid': info.utmClid,
+    'Qtd. de Contatos': qtdContatos,
   };
 
   const existente = await sheets.findRowByColumn('conversoes', 'Session ID (GymBot)', sessionId);

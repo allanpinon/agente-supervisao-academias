@@ -37,6 +37,10 @@ async function processContactNew(contact) {
     'UTM Medium': info.utmMedium,
     'UTM Campaign': info.utmCampaign,
     'UTM Clid': info.utmClid,
+    // Comeca em 1 (o proprio contato acabou de entrar em contato pela
+    // primeira vez). processSessionNew mantem este numero atualizado a
+    // cada nova sessao deste mesmo Contact ID.
+    'Qtd. de Contatos': 1,
   };
   await sheets.appendRow('leads', row);
   logger.info(`[processContact] Novo lead registrado: ${contact.id} (${marca || 'marca desconhecida'})`);

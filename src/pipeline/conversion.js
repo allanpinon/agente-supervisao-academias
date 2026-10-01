@@ -46,6 +46,7 @@ const sheets = require('../clients/sheets');
 const flwchat = require('../clients/flwchat');
 const { config } = require('../config');
 const { resolveMarcaUnidade, extractTagsId, resolveMarcaPorAtendente } = require('../utils/tags');
+const { extractContactInfo } = require('../utils/contact');
 const { nowLocal, diffInDays } = require('../utils/dates');
 const logger = require('../utils/logger');
 
@@ -90,6 +91,15 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
   );
   const dataOrigemLead = primeiroAtendimento?.['Data/Hora'] || atendimentoRow['Data/Hora'];
 
+  // Telefone/Instagram/E-mail/Origem/UTM — adicionados em 01/10/2026, pra
+  // (1) alimentar o futuro envio de conversao pro Meta Ads via Conversions
+  // API (telefone/clid como chaves de correspondencia) e (2) dar uma
+  // leitura de origem paga/organica confiavel, direto do dado do contato,
+  // sem depender de tag manual (ver "Remocao do 'Pago x Organica'",
+  // 21/08/2026, e "CONFIRMADO COM DADO REAL — schema completo de contato",
+  // 01/10/2026, em claude/arquitetura-agente-supervisao.md).
+  const info = extractContactInfo(contactDetails);
+
   const linha = {
     'Data/Hora': dataClassificacao,
     Marca: marca,
@@ -107,6 +117,14 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
       ? Math.max(0, Math.round(diffInDays(dataOrigemLead, dataClassificacao)))
       : '',
     'Contact ID (GymBot)': contactIdAtual || '',
+    Telefone: info.telefone,
+    Instagram: info.instagram,
+    'E-mail': info.email,
+    'Origem (Paga/Orgânica)': info.origemPagaOrganica,
+    'UTM Source': info.utmSource,
+    'UTM Medium': info.utmMedium,
+    'UTM Campaign': info.utmCampaign,
+    'UTM Clid': info.utmClid,
   };
 
   const existente = await sheets.findRowByColumn('conversoes', 'Session ID (GymBot)', sessionId);

@@ -3,14 +3,9 @@
 // atualiza marca/unidade/atendente se a tag mudou depois da criacao.
 const sheets = require('../clients/sheets');
 const { resolveMarcaUnidade, extractTagsId } = require('../utils/tags');
+const { extractContactInfo } = require('../utils/contact');
 const { nowLocal } = require('../utils/dates');
 const logger = require('../utils/logger');
-
-function isPago(utm) {
-  // Considera "pago" quando existe qualquer sinal de campanha no UTM.
-  if (!utm) return false;
-  return Boolean(utm.source || utm.sourceId || utm.campaign || utm.medium);
-}
 
 async function processContactNew(contact) {
   // CONTACT_NEW pode chegar duplicado (reenvio de webhook do GymBot, ou a
@@ -25,16 +20,23 @@ async function processContactNew(contact) {
   }
 
   const { marca, unidade } = resolveMarcaUnidade(extractTagsId(contact));
+  const info = extractContactInfo(contact);
   const row = {
     'Data/Hora': nowLocal().toISO(),
     Marca: marca || '',
     Unidade: unidade || '',
     'Nome do Lead': contact.name || '',
     Canal: contact.instagram ? 'Instagram' : 'WhatsApp',
-    'Origem (Paga/Orgânica)': isPago(contact.utm) ? 'Paga' : 'Orgânica',
-    'UTM Source': contact.utm?.source || '',
+    'Origem (Paga/Orgânica)': info.origemPagaOrganica,
+    'UTM Source': info.utmSource,
     Atendente: '',
     'Contact ID (GymBot)': contact.id,
+    Telefone: info.telefone,
+    Instagram: info.instagram,
+    'E-mail': info.email,
+    'UTM Medium': info.utmMedium,
+    'UTM Campaign': info.utmCampaign,
+    'UTM Clid': info.utmClid,
   };
   await sheets.appendRow('leads', row);
   logger.info(`[processContact] Novo lead registrado: ${contact.id} (${marca || 'marca desconhecida'})`);
@@ -51,10 +53,23 @@ async function processContactTagUpdate(contact) {
     return;
   }
 
+  // Reforca telefone/instagram/e-mail/origem tambem na atualizacao por tag
+  // — mesmo padrao "so sobrescreve se vier valor novo" ja usado pra
+  // Marca/Unidade, pra nunca apagar um dado ja gravado com um valor vazio
+  // vindo deste evento especifico.
+  const info = extractContactInfo(contact);
   const updated = {
     ...existing,
     Marca: marca || existing.Marca,
     Unidade: unidade || existing.Unidade,
+    Telefone: info.telefone || existing.Telefone,
+    Instagram: info.instagram || existing.Instagram,
+    'E-mail': info.email || existing['E-mail'],
+    'Origem (Paga/Orgânica)': info.utmSource ? info.origemPagaOrganica : existing['Origem (Paga/Orgânica)'],
+    'UTM Source': info.utmSource || existing['UTM Source'],
+    'UTM Medium': info.utmMedium || existing['UTM Medium'],
+    'UTM Campaign': info.utmCampaign || existing['UTM Campaign'],
+    'UTM Clid': info.utmClid || existing['UTM Clid'],
   };
   await sheets.updateRow('leads', existing._rowNumber, updated);
   logger.info(`[processContact] Lead atualizado (tag): ${contact.id} -> ${marca || '?'} / ${unidade || '?'}`);

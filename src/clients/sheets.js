@@ -16,6 +16,13 @@ const SHEETS = {
     headers: [
       'Data/Hora', 'Marca', 'Unidade', 'Nome do Lead', 'Canal',
       'Origem (Paga/Orgânica)', 'UTM Source', 'Atendente', 'Contact ID (GymBot)',
+      // Adicionadas em 01/10/2026 — ver claude/arquitetura-agente-supervisao.md,
+      // secao "CONFIRMADO COM DADO REAL — schema completo de contato".
+      // IMPORTANTE: colunas novas sempre no FIM da lista (nunca inseridas no
+      // meio) — o codigo escreve por POSICAO, entao a LINHA 1 (cabecalho) da
+      // aba real no Google Sheets precisa ganhar estas mesmas colunas, nesta
+      // mesma ordem, no final da planilha real, antes do proximo deploy.
+      'Telefone', 'Instagram', 'E-mail', 'UTM Medium', 'UTM Campaign', 'UTM Clid',
     ],
   },
   atendimentos: {
@@ -60,6 +67,16 @@ const SHEETS = {
     headers: [
       'Data/Hora', 'Marca', 'Unidade', 'Atendente', 'Lead', 'Resultado', 'Valor',
       'Session ID (GymBot)', 'Motivo', 'Dias até Classificação', 'Contact ID (GymBot)',
+      // Adicionadas em 01/10/2026 — pedido explicito do usuario: agregar
+      // telefone/instagram/e-mail (pra correspondencia com o Meta Ads via
+      // Conversions API) e origem/canal/campanha (independente de tag, ja
+      // que a tag provou ser nao-confiavel — ver "Remocao do 'Pago x
+      // Organica'", 21/08/2026) na planilha de Conversões. Ver
+      // claude/arquitetura-agente-supervisao.md pro schema real confirmado.
+      // Mesma regra: colunas sempre no FIM, cabecalho real precisa ser
+      // atualizado manualmente na mesma ordem antes do proximo deploy.
+      'Telefone', 'Instagram', 'E-mail', 'Origem (Paga/Orgânica)',
+      'UTM Source', 'UTM Medium', 'UTM Campaign', 'UTM Clid',
     ],
   },
   avaliacoes: {

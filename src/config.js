@@ -74,7 +74,19 @@ const config = {
   // Eventos do Meta.
   metaCapi: {
     enabled: process.env.META_CAPI_ENABLED === 'true',
-    accessToken: process.env.META_CAPI_ACCESS_TOKEN,
+    // Token por marca — ver 01/10/2026, "Token por Pixel (caminho simples)":
+    // o caminho mais rapido de gerar token no Meta e direto na tela de cada
+    // Pixel (Gerenciador de Eventos -> Pixel -> Configuracoes -> Conversions
+    // API -> Gerar token de acesso), o que gera UM TOKEN POR PIXEL, nao um
+    // token unico compartilhado. Cada marca usa primeiro seu proprio token
+    // (META_CAPI_ACCESS_TOKEN_GRECO_FORMA / _FITCOM); se nao estiver
+    // definido, cai pro token unico (META_CAPI_ACCESS_TOKEN) — util se no
+    // futuro for gerado um token so, via Usuario do Sistema, com acesso aos
+    // dois Pixels.
+    accessTokens: {
+      'Greco Forma': process.env.META_CAPI_ACCESS_TOKEN_GRECO_FORMA || process.env.META_CAPI_ACCESS_TOKEN,
+      'Fit.com': process.env.META_CAPI_ACCESS_TOKEN_FITCOM || process.env.META_CAPI_ACCESS_TOKEN,
+    },
     apiVersion: process.env.META_CAPI_API_VERSION || 'v21.0',
     // Nome customizado (nao "Purchase") para nao se confundir/duplicar com
     // o Purchase que o Pixel do Pacto ja dispara para vendas online feitas
@@ -161,7 +173,8 @@ function assertConfigured() {
   if (!config.evolution.instance) missing.push('EVOLUTION_INSTANCE');
   if (!config.evolution.apiKey) missing.push('EVOLUTION_API_KEY');
   if (config.metaCapi.enabled) {
-    if (!config.metaCapi.accessToken) missing.push('META_CAPI_ACCESS_TOKEN');
+    if (!config.metaCapi.accessTokens['Greco Forma']) missing.push('META_CAPI_ACCESS_TOKEN_GRECO_FORMA (ou META_CAPI_ACCESS_TOKEN)');
+    if (!config.metaCapi.accessTokens['Fit.com']) missing.push('META_CAPI_ACCESS_TOKEN_FITCOM (ou META_CAPI_ACCESS_TOKEN)');
     if (!config.metaCapi.pixelIds['Greco Forma']) missing.push('META_PIXEL_ID_GRECO_FORMA');
     if (!config.metaCapi.pixelIds['Fit.com']) missing.push('META_PIXEL_ID_FITCOM');
   }

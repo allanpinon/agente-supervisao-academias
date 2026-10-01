@@ -81,8 +81,12 @@ async function enviarConversao(dados) {
     logger.warn(`[metaCapi] Nenhum Pixel ID configurado para a marca "${marca}" — evento nao enviado.`);
     return { enviado: false, motivo: 'sem-pixel-id' };
   }
-  if (!config.metaCapi.accessToken) {
-    logger.warn('[metaCapi] META_CAPI_ACCESS_TOKEN ausente — evento nao enviado.');
+  // Token por marca (gerado direto na tela de cada Pixel no Meta) — ver
+  // config.metaCapi.accessTokens. Cai pro token unico compartilhado
+  // (META_CAPI_ACCESS_TOKEN) se nenhum token especifico da marca existir.
+  const accessToken = config.metaCapi.accessTokens[marca];
+  if (!accessToken) {
+    logger.warn(`[metaCapi] Nenhum token de acesso configurado para a marca "${marca}" (nem especifico, nem META_CAPI_ACCESS_TOKEN) — evento nao enviado.`);
     return { enviado: false, motivo: 'sem-token' };
   }
 
@@ -121,7 +125,7 @@ async function enviarConversao(dados) {
 
   try {
     const { data } = await axios.post(url, payload, {
-      params: { access_token: config.metaCapi.accessToken },
+      params: { access_token: accessToken },
       timeout: 15000,
     });
     logger.info(

@@ -91,6 +91,22 @@ const SHEETS = {
       // momento desta classificacao — util pra ver, por exemplo, que uma
       // conversao veio so depois do 3o contato, nao do primeiro.
       'Qtd. de Contatos',
+      // Adicionada em 22/10/2026 — ACHADO: SESSION_COMPLETE (com a
+      // classificacao "Ganho") pode chegar ANTES da tag de marca ser
+      // aplicada no contato (duas origens diferentes no GymBot, sem ordem
+      // garantida) — confirmado com teste real (sessao 457ac25e), que
+      // converteu normalmente mas o envio pro Meta foi descartado
+      // silenciosamente ("Nenhum Pixel ID configurado para a marca ''").
+      // Esta coluna torna esse estado visivel ("Enviado" / "Pendente
+      // (motivo)") e permite a varredura de reconciliacao
+      // (src/reconciliation/sweep.js, via resendPendingMetaCapiEvents em
+      // src/pipeline/conversion.js) tentar reenviar automaticamente assim
+      // que a marca ficar resolvivel (pelo nome da atendente, ja gravado
+      // nesta mesma linha) — sem nunca reenviar linhas antigas (so entram
+      // nesse mecanismo linhas que ja nasceram com "Pendente (...)" aqui,
+      // nunca uma linha em branco/historica, pra nao inundar o Meta com
+      // conversoes antigas).
+      'Meta CAPI',
     ],
   },
   avaliacoes: {

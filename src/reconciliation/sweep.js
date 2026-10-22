@@ -18,7 +18,7 @@ const flwchat = require('../clients/flwchat');
 const sheets = require('../clients/sheets');
 const { config } = require('../config');
 const { nowLocal } = require('../utils/dates');
-const { registerConversionOutcome, marcarResultadoAvaliacao } = require('../pipeline/conversion');
+const { registerConversionOutcome, marcarResultadoAvaliacao, resendPendingMetaCapiEvents } = require('../pipeline/conversion');
 const logger = require('../utils/logger');
 
 async function runReconciliationSweep() {
@@ -102,7 +102,29 @@ async function runReconciliationSweep() {
     `[sweep] Varredura concluida: ${novasConversoes} nova(s) conversao(oes), ` +
     `${expirados.length} finalizada(s) como "Nao convertido".`
   );
-  return { verificados: pending.length, novasConversoes, expirados: expirados.length };
+
+  // ACHADO (22/10/2026): SESSION_COMPLETE pode chegar antes da tag de
+  // marca ser aplicada no contato — quando isso acontece, a conversao e
+  // gravada normalmente mas o evento pro Meta e descartado (ver
+  // src/pipeline/conversion.js). Reaproveita esta mesma varredura (ja
+  // roda antes de todo relatorio, de forma controlada) pra tentar
+  // reenviar esses casos assim que a marca ficar resolvivel — nunca
+  // mexe em conversoes antigas, so nas marcadas "Pendente (...)" por
+  // este proprio codigo.
+  let metaCapiResult = { verificadas: 0, reenviadas: 0, aindaPendentes: 0 };
+  try {
+    metaCapiResult = await resendPendingMetaCapiEvents();
+  } catch (err) {
+    logger.warn(`[sweep] Falha ao tentar reenviar eventos pendentes pro Meta CAPI: ${err.message}`);
+  }
+
+  return {
+    verificados: pending.length,
+    novasConversoes,
+    expirados: expirados.length,
+    metaCapiReenviadas: metaCapiResult.reenviadas,
+    metaCapiAindaPendentes: metaCapiResult.aindaPendentes,
+  };
 }
 
 module.exports = { runReconciliationSweep, marcarResultadoAvaliacao };

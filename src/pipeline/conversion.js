@@ -109,6 +109,61 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
     ? await sheets.countRowsByColumn('atendimentos', 'Contact ID (GymBot)', contactIdAtual)
     : '';
 
+  const existente = await sheets.findRowByColumn('conversoes', 'Session ID (GymBot)', sessionId);
+  // Guardado ANTES de decidir o envio — e o que decide, logo abaixo, se
+  // esta chamada e uma transicao NOVA pra "Convertido" (dispara Meta CAPI)
+  // ou so uma atualizacao/reentrega que ja estava "Convertido" antes (nao
+  // dispara de novo, evita duplicar o evento de conversao no Meta).
+  const resultadoAnterior = existente?.Resultado;
+
+  // Status do envio pro Meta (coluna "Meta CAPI") — soh decidido/alterado
+  // na transicao NOVA pra "Convertido" (ver bloco abaixo). Fora dessa
+  // transicao, mantem o valor que a linha ja tinha (nunca reseta um
+  // "Enviado" antigo, nem mexe num "Pendente" fora do mecanismo de retry
+  // dedicado — ver resendPendingMetaCapiEvents, mais abaixo neste
+  // arquivo).
+  let metaCapiStatus = existente?.['Meta CAPI'] || '';
+
+  // Envio pro Meta Ads (Conversions API) — so na transicao DE/PARA
+  // "Convertido" (primeira vez que fecha, ou corrigida de "Nao
+  // convertido" pra "Convertido"). Nunca reenvia se a sessao ja estava
+  // "Convertido" antes desta chamada (reentrega do mesmo webhook
+  // SESSION_COMPLETE — ja confirmado que o GymBot faz isso — ou so um
+  // campo novo sendo preenchido). Nunca lanca excecao: metaCapi.
+  // enviarConversao ja captura os proprios erros e so loga; o try/catch
+  // aqui e so uma segunda rede de seguranca.
+  if (resultado === 'Convertido' && resultadoAnterior !== 'Convertido') {
+    try {
+      const envio = await metaCapi.enviarConversao({
+        marca,
+        telefone: info.telefone,
+        email: info.email,
+        valor: classification.amount,
+        dataHora: dataClassificacao,
+        sessionId,
+      });
+      // ACHADO (22/10/2026, teste real sessao 457ac25e): quando o
+      // SESSION_COMPLETE chega antes da tag de marca ser aplicada no
+      // contato, `marca` vem vazia e o envio e descartado em silencio
+      // (so um log de warn) — a conversao fica "Convertido" pra sempre
+      // sem o Meta nunca saber. Gravar o motivo aqui torna esse estado
+      // visivel na planilha e permite retry automatico (ver
+      // resendPendingMetaCapiEvents).
+      metaCapiStatus = envio.enviado ? 'Enviado' : `Pendente (${envio.motivo || 'erro desconhecido'})`;
+    } catch (err) {
+      logger.error(`[conversion] Falha inesperada ao tentar enviar conversao da sessao ${sessionId} pro Meta: ${err.message}`);
+      metaCapiStatus = 'Pendente (erro inesperado)';
+    }
+  } else if (resultado === 'Convertido' && resultadoAnterior === 'Convertido') {
+    // Log explicito pra este caso NAO ficar em silencio (ambiguo demais pra
+    // diagnosticar depois): sem esta linha, "pulei de proposito porque ja
+    // tava Convertido" e "o modulo metaCapi nem rodou por causa de um
+    // problema de deploy" ficavam indistinguiveis so lendo o log — achado
+    // real em teste de 01/10/2026 (sessao 8775b6d4), investigado e corrigido
+    // nesta mudanca.
+    logger.info(`[conversion] Sessao ${sessionId} ja estava "Convertido" antes desta chamada — evento NAO reenviado pro Meta (evita duplicidade).`);
+  }
+
   const linha = {
     'Data/Hora': dataClassificacao,
     Marca: marca,
@@ -135,14 +190,8 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
     'UTM Campaign': info.utmCampaign,
     'UTM Clid': info.utmClid,
     'Qtd. de Contatos': qtdContatos,
+    'Meta CAPI': resultado === 'Convertido' ? metaCapiStatus : '',
   };
-
-  const existente = await sheets.findRowByColumn('conversoes', 'Session ID (GymBot)', sessionId);
-  // Guardado ANTES de sobrescrever — e o que decide, logo abaixo, se esta
-  // chamada e uma transicao NOVA pra "Convertido" (dispara Meta CAPI) ou
-  // so uma atualizacao/reentrega que ja estava "Convertido" antes (nao
-  // dispara de novo, evita duplicar o evento de conversao no Meta).
-  const resultadoAnterior = existente?.Resultado;
 
   if (existente) {
     const mudou = Object.keys(linha).some((k) => String(existente[k] ?? '') !== String(linha[k] ?? ''));
@@ -151,38 +200,77 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
     await sheets.appendRow('conversoes', linha);
   }
 
-  // Envio pro Meta Ads (Conversions API) — so na transicao DE/PARA
-  // "Convertido" (primeira vez que fecha, ou corrigida de "Nao
-  // convertido" pra "Convertido"). Nunca reenvia se a sessao ja estava
-  // "Convertido" antes desta chamada (reentrega do mesmo webhook
-  // SESSION_COMPLETE — ja confirmado que o GymBot faz isso — ou so um
-  // campo novo sendo preenchido). Nunca lanca excecao: metaCapi.
-  // enviarConversao ja captura os proprios erros e so loga; o try/catch
-  // aqui e so uma segunda rede de seguranca.
-  if (resultado === 'Convertido' && resultadoAnterior !== 'Convertido') {
+  return { novaLinha: !existente, atualizada: Boolean(existente) };
+}
+
+// Varre "Conversões" procurando linhas "Convertido" cujo envio pro Meta
+// ficou PENDENTE (coluna "Meta CAPI" comeca com "Pendente (" — nunca
+// linhas em branco/historicas, de proposito: so passam por aqui linhas
+// que ESTE codigo mesmo marcou como pendentes, nunca o passado, pra nao
+// reenviar uma enxurrada de conversoes antigas pro Meta — ver nota em
+// src/integrations/metaCapi.js). Pra cada uma, tenta resolver a marca de
+// novo (pelo nome da atendente, ja gravado na linha — a mesma fonte mais
+// confiavel que resolveMarcaPorAtendente ja usa, ver src/utils/tags.js) e,
+// se resolver, reenvia pro Pixel certo. Chamado pela varredura de
+// reconciliacao (src/reconciliation/sweep.js), que ja roda antes de todo
+// relatorio — nunca no caminho em tempo real, pra nao tentar de novo a
+// cada webhook reentregue.
+async function resendPendingMetaCapiEvents() {
+  const rows = await sheets.readAll('conversoes');
+  const pendentes = rows.filter(
+    (r) => r.Resultado === 'Convertido' && String(r['Meta CAPI'] || '').startsWith('Pendente (')
+  );
+
+  if (!pendentes.length) return { verificadas: 0, reenviadas: 0, aindaPendentes: 0 };
+
+  let reenviadas = 0;
+  let aindaPendentes = 0;
+
+  for (const row of pendentes) {
+    const sessionId = row['Session ID (GymBot)'];
+    const marcaResolvida = resolveMarcaPorAtendente(row.Atendente) || row.Marca || '';
+
+    if (!marcaResolvida) {
+      aindaPendentes += 1;
+      continue; // eslint-disable-line no-continue
+    }
+
     try {
-      await metaCapi.enviarConversao({
-        marca,
-        telefone: info.telefone,
-        email: info.email,
-        valor: classification.amount,
-        dataHora: dataClassificacao,
+      // eslint-disable-next-line no-await-in-loop
+      const envio = await metaCapi.enviarConversao({
+        marca: marcaResolvida,
+        telefone: row.Telefone,
+        email: row['E-mail'],
+        valor: row.Valor,
+        dataHora: row['Data/Hora'],
         sessionId,
       });
+
+      const novoStatus = envio.enviado ? 'Enviado' : `Pendente (${envio.motivo || 'erro desconhecido'})`;
+      // eslint-disable-next-line no-await-in-loop
+      await sheets.updateRow('conversoes', row._rowNumber, {
+        ...row,
+        Marca: marcaResolvida,
+        'Meta CAPI': novoStatus,
+      });
+
+      if (envio.enviado) {
+        reenviadas += 1;
+        logger.info(`[conversion] Reenvio pendente da sessao ${sessionId} concluido com sucesso (marca "${marcaResolvida}").`);
+      } else {
+        aindaPendentes += 1;
+      }
     } catch (err) {
-      logger.error(`[conversion] Falha inesperada ao tentar enviar conversao da sessao ${sessionId} pro Meta: ${err.message}`);
+      aindaPendentes += 1;
+      logger.warn(`[conversion] Falha ao tentar reenviar sessao ${sessionId} pro Meta: ${err.message}`);
     }
-  } else if (resultado === 'Convertido' && resultadoAnterior === 'Convertido') {
-    // Log explicito pra este caso NAO ficar em silencio (ambiguo demais pra
-    // diagnosticar depois): sem esta linha, "pulei de proposito porque ja
-    // tava Convertido" e "o modulo metaCapi nem rodou por causa de um
-    // problema de deploy" ficavam indistinguiveis so lendo o log — achado
-    // real em teste de 01/10/2026 (sessao 8775b6d4), investigado e corrigido
-    // nesta mudanca.
-    logger.info(`[conversion] Sessao ${sessionId} ja estava "Convertido" antes desta chamada — evento NAO reenviado pro Meta (evita duplicidade).`);
   }
 
-  return { novaLinha: !existente, atualizada: Boolean(existente) };
+  logger.info(
+    `[conversion] Reenvio de eventos pendentes pro Meta: ${pendentes.length} encontrada(s), ` +
+    `${reenviadas} reenviada(s) com sucesso, ${aindaPendentes} ainda pendente(s).`
+  );
+  return { verificadas: pendentes.length, reenviadas, aindaPendentes };
 }
 
 // `session` precisa ter `.classification` (do webhook cru ou, no futuro,
@@ -240,4 +328,4 @@ async function registerConversionOutcome(session, atendimentoRow) {
   return { outcome: 'categoria-desconhecida', category, categoryName: classification.categoryName };
 }
 
-module.exports = { registerConversionOutcome, marcarResultadoAvaliacao };
+module.exports = { registerConversionOutcome, marcarResultadoAvaliacao, resendPendingMetaCapiEvents };

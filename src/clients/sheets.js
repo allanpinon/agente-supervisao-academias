@@ -91,22 +91,25 @@ const SHEETS = {
       // momento desta classificacao — util pra ver, por exemplo, que uma
       // conversao veio so depois do 3o contato, nao do primeiro.
       'Qtd. de Contatos',
-      // Adicionada em 22/10/2026 — ACHADO: SESSION_COMPLETE (com a
-      // classificacao "Ganho") pode chegar ANTES da tag de marca ser
-      // aplicada no contato (duas origens diferentes no GymBot, sem ordem
-      // garantida) — confirmado com teste real (sessao 457ac25e), que
-      // converteu normalmente mas o envio pro Meta foi descartado
-      // silenciosamente ("Nenhum Pixel ID configurado para a marca ''").
-      // Esta coluna torna esse estado visivel ("Enviado" / "Pendente
-      // (motivo)") e permite a varredura de reconciliacao
-      // (src/reconciliation/sweep.js, via resendPendingMetaCapiEvents em
-      // src/pipeline/conversion.js) tentar reenviar automaticamente assim
-      // que a marca ficar resolvivel (pelo nome da atendente, ja gravado
-      // nesta mesma linha) — sem nunca reenviar linhas antigas (so entram
-      // nesse mecanismo linhas que ja nasceram com "Pendente (...)" aqui,
-      // nunca uma linha em branco/historica, pra nao inundar o Meta com
-      // conversoes antigas).
-      'Meta CAPI',
+      // NAO ADICIONE "Meta CAPI" aqui. ACHADO (22/10/2026): a aba real
+      // "Conversões" tem, logo depois desta coluna, uma coluna "Data Real"
+      // (U) com uma FORMULA proria por linha (confirmado direto na celula:
+      // =VALOR(ESQUERDA(SUBSTITUIR(A<linha>;"T";" ");19)) — converte o
+      // Data/Hora ISO em data/hora legivel) que NAO e gerida por este
+      // codigo e nunca pode ser sobrescrita. "Meta CAPI" fica na coluna
+      // SEGUINTE (V), depois de "Data Real" — ou seja, ha um "buraco" de
+      // uma coluna entre o fim desta lista (T, "Qtd. de Contatos") e onde
+      // "Meta CAPI" realmente mora na planilha real. Como appendRow/
+      // updateRow escrevem um range CONTIGUO do tamanho de `headers`, nao
+      // da pra incluir "Meta CAPI" nesta lista sem o range passar por cima
+      // da coluna "Data Real" no meio do caminho. A coluna "Meta CAPI" e
+      // lida/escrita por fora, via readConversoesComMetaCapi() e
+      // updateMetaCapiStatus() (mais abaixo neste arquivo) — usadas por
+      // src/pipeline/conversion.js. Ver tambem a correcao de rotulo de
+      // cabecalho feita manualmente na planilha em 22/10/2026 (as colunas
+      // de dado SEMPRE estiveram certas — so os RÓTULOS de P a T na linha 1
+      // da planilha real estavam um a direita do que deveriam, mascarando
+      // esse layout).
     ],
   },
   avaliacoes: {
@@ -201,13 +204,19 @@ async function withRetry(fn, { retries = 6, baseDelayMs = 3000 } = {}) {
 }
 
 // Adiciona uma linha nova no fim da planilha. `rowObject` deve ter chaves
-// iguais (ou um subconjunto) dos headers definidos acima.
+// iguais (ou um subconjunto) dos headers definidos acima. Devolve o numero
+// da linha (1-based) onde a linha foi inserida de verdade — lido direto da
+// resposta da API (`updatedRange`), nao calculado, porque com
+// insertDataOption: INSERT_ROWS a posicao exata so e conhecida depois do
+// Google Sheets responder. Usado por conversion.js para, logo em seguida,
+// escrever "Meta CAPI" (coluna V) de uma linha que acabou de ser criada —
+// ver updateMetaCapiStatus abaixo.
 async function appendRow(sheetKey, rowObject) {
   const def = sheetDef(sheetKey);
   const row = def.headers.map((h) => rowObject[h] ?? '');
-  await withRetry(async () => {
+  const resp = await withRetry(async () => {
     const api = await sheetsApi();
-    await api.spreadsheets.values.append({
+    return api.spreadsheets.values.append({
       spreadsheetId: def.id,
       range: `${def.tab}!A1`,
       valueInputOption: 'USER_ENTERED',
@@ -215,6 +224,9 @@ async function appendRow(sheetKey, rowObject) {
       requestBody: { values: [row] },
     });
   });
+  const updatedRange = resp?.data?.updates?.updatedRange || '';
+  const match = updatedRange.match(/!\$?[A-Z]+\$?(\d+)/);
+  return { rowNumber: match ? Number(match[1]) : null };
 }
 
 // Le todas as linhas da planilha como uma lista de objetos {header: valor}.
@@ -348,6 +360,53 @@ async function countRowsByColumn(sheetKey, header, value) {
   return rows.filter((r) => r[header] === value).length;
 }
 
+// Le a aba "Conversões" incluindo a coluna "Meta CAPI" (V) — que fica FORA
+// do range normal de readAll/findRowByColumn (A:T, baseado em
+// conversoes.headers), porque entre o fim desse range (T, "Qtd. de
+// Contatos") e "Meta CAPI" existe a coluna "Data Real" (U), uma formula
+// propria por linha que este codigo nunca escreve nem le via o mecanismo
+// generico (ver nota em conversoes.headers, acima). Faz UMA UNICA leitura
+// A2:V (nao duas leituras separadas) pra garantir que cada linha do
+// resultado continua alinhada com o numero de linha real da planilha,
+// mesmo quando ha linhas com celulas finais vazias no meio.
+async function readConversoesComMetaCapi() {
+  const def = sheetDef('conversoes');
+  const data = await withRetry(async () => {
+    const api = await sheetsApi();
+    const resp = await api.spreadsheets.values.get({
+      spreadsheetId: def.id,
+      range: `${def.tab}!A2:V100000`,
+    });
+    return resp.data;
+  });
+  const rows = data.values || [];
+  return rows.map((row, idx) => {
+    const obj = { _rowNumber: idx + 2 };
+    def.headers.forEach((h, i) => { obj[h] = row[i] ?? ''; });
+    obj['Meta CAPI'] = row[21] ?? ''; // coluna V = indice 21 (0-based; U/"Data Real" = indice 20, pulado de proposito)
+    return obj;
+  });
+}
+
+// Escreve SO a coluna "Meta CAPI" (V) de uma linha especifica da aba
+// "Conversões", por numero de linha — nunca usa updateRow (que escreveria
+// um range contiguo a partir de A, passando por cima de "Data Real" se ela
+// entrasse em conversoes.headers) pra nao arriscar sobrescrever aquela
+// formula por engano. Ver conversoes.headers e readConversoesComMetaCapi,
+// acima, pro contexto completo.
+async function updateMetaCapiStatus(rowNumber, status) {
+  const def = sheetDef('conversoes');
+  await withRetry(async () => {
+    const api = await sheetsApi();
+    await api.spreadsheets.values.update({
+      spreadsheetId: def.id,
+      range: `${def.tab}!V${rowNumber}:V${rowNumber}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[status]] },
+    });
+  });
+}
+
 module.exports = {
   SHEETS,
   appendRow,
@@ -358,4 +417,6 @@ module.exports = {
   buildIndex,
   replaceAll,
   countRowsByColumn,
+  readConversoesComMetaCapi,
+  updateMetaCapiStatus,
 };

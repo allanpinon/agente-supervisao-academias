@@ -116,13 +116,16 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
   // dispara de novo, evita duplicar o evento de conversao no Meta).
   const resultadoAnterior = existente?.Resultado;
 
-  // Status do envio pro Meta (coluna "Meta CAPI") — soh decidido/alterado
-  // na transicao NOVA pra "Convertido" (ver bloco abaixo). Fora dessa
-  // transicao, mantem o valor que a linha ja tinha (nunca reseta um
-  // "Enviado" antigo, nem mexe num "Pendente" fora do mecanismo de retry
-  // dedicado — ver resendPendingMetaCapiEvents, mais abaixo neste
-  // arquivo).
-  let metaCapiStatus = existente?.['Meta CAPI'] || '';
+  // Status do envio pro Meta (coluna "Meta CAPI", V) — so decidido/
+  // escrito na transicao NOVA pra "Convertido" (ver bloco abaixo).
+  // `metaCapiPronto` controla se vamos escrever algo na coluna V ao final
+  // desta funcao: fora da transicao, NUNCA tocamos nessa coluna (nem pra
+  // reler o valor atual) — ela e lida/escrita por fora do range normal
+  // A:T, direto via sheets.updateMetaCapiStatus, pra nao arriscar passar
+  // por cima da coluna "Data Real" (U, uma formula por linha — ver
+  // conversoes.headers em src/clients/sheets.js).
+  let metaCapiStatus = '';
+  let metaCapiPronto = false;
 
   // Envio pro Meta Ads (Conversions API) — so na transicao DE/PARA
   // "Convertido" (primeira vez que fecha, ou corrigida de "Nao
@@ -150,9 +153,11 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
       // visivel na planilha e permite retry automatico (ver
       // resendPendingMetaCapiEvents).
       metaCapiStatus = envio.enviado ? 'Enviado' : `Pendente (${envio.motivo || 'erro desconhecido'})`;
+      metaCapiPronto = true;
     } catch (err) {
       logger.error(`[conversion] Falha inesperada ao tentar enviar conversao da sessao ${sessionId} pro Meta: ${err.message}`);
       metaCapiStatus = 'Pendente (erro inesperado)';
+      metaCapiPronto = true;
     }
   } else if (resultado === 'Convertido' && resultadoAnterior === 'Convertido') {
     // Log explicito pra este caso NAO ficar em silencio (ambiguo demais pra
@@ -190,14 +195,24 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
     'UTM Campaign': info.utmCampaign,
     'UTM Clid': info.utmClid,
     'Qtd. de Contatos': qtdContatos,
-    'Meta CAPI': resultado === 'Convertido' ? metaCapiStatus : '',
   };
 
+  let rowNumber;
   if (existente) {
     const mudou = Object.keys(linha).some((k) => String(existente[k] ?? '') !== String(linha[k] ?? ''));
     if (mudou) await sheets.updateRow('conversoes', existente._rowNumber, linha);
+    rowNumber = existente._rowNumber;
   } else {
-    await sheets.appendRow('conversoes', linha);
+    const inserida = await sheets.appendRow('conversoes', linha);
+    rowNumber = inserida?.rowNumber;
+  }
+
+  // So escreve na coluna "Meta CAPI" (V) quando esta chamada acabou de
+  // decidir um status novo (transicao pra "Convertido", nos dois ramos
+  // acima) — nunca como parte da gravacao normal da linha, e sempre por
+  // fora do range A:T (ver sheets.updateMetaCapiStatus).
+  if (metaCapiPronto && rowNumber) {
+    await sheets.updateMetaCapiStatus(rowNumber, metaCapiStatus);
   }
 
   return { novaLinha: !existente, atualizada: Boolean(existente) };
@@ -216,7 +231,7 @@ async function registrarClassificacao(session, atendimentoRow, resultado, catego
 // relatorio — nunca no caminho em tempo real, pra nao tentar de novo a
 // cada webhook reentregue.
 async function resendPendingMetaCapiEvents() {
-  const rows = await sheets.readAll('conversoes');
+  const rows = await sheets.readConversoesComMetaCapi();
   const pendentes = rows.filter(
     (r) => r.Resultado === 'Convertido' && String(r['Meta CAPI'] || '').startsWith('Pendente (')
   );
@@ -247,12 +262,15 @@ async function resendPendingMetaCapiEvents() {
       });
 
       const novoStatus = envio.enviado ? 'Enviado' : `Pendente (${envio.motivo || 'erro desconhecido'})`;
+
+      if (marcaResolvida !== row.Marca) {
+        // Grava a marca corrigida pelo range normal A:T (nunca mexe em V
+        // aqui — ver sheets.updateMetaCapiStatus logo abaixo).
+        // eslint-disable-next-line no-await-in-loop
+        await sheets.updateRow('conversoes', row._rowNumber, { ...row, Marca: marcaResolvida });
+      }
       // eslint-disable-next-line no-await-in-loop
-      await sheets.updateRow('conversoes', row._rowNumber, {
-        ...row,
-        Marca: marcaResolvida,
-        'Meta CAPI': novoStatus,
-      });
+      await sheets.updateMetaCapiStatus(row._rowNumber, novoStatus);
 
       if (envio.enviado) {
         reenviadas += 1;
